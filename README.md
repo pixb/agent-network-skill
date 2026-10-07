@@ -8,16 +8,18 @@ agent-network（CommHub MCP）双 agent 协作协议的统一技能。规划者�
 在项目工作目录（如 `~/Downloads/tetris`、`~/Downloads/pi-work/tetris`）执行：
 
 ```bash
-git submodule add git@github.com:pixb/agent-network-skill.git skills
-mkdir -p .agents/skills
-ln -s ../../skills .agents/skills/agent-network-skill
+mkdir -p skills .agents/skills
+git submodule add git@github.com:pixb/agent-network-skill.git skills/agent-network-skill
+ln -s ../../skills/agent-network-skill .agents/skills/agent-network-skill
 git add skills .agents/skills && git commit -m "add agent-network-skill submodule"
 ```
 
-根目录的 `skills/` 是权威内容（submodule）；`.agents/skills/agent-network-skill`
-是发现用符号链接——pi 与 opencode 都原生扫描项目级 `.agents/skills/**/SKILL.md`。
+根目录的 `skills/` 是存放技能的容器目录（可放多个技能），每个技能一个 submodule；
+`.agents/skills/agent-network-skill` 是发现用符号链接——pi 与 opencode 都原生扫描
+项目级 `.agents/skills/**/SKILL.md`。新增技能时同样
+`git submodule add ... skills/<name>` 并补一条同名符号链接。
 
-更新：`git submodule update --remote skills` 后提交。
+更新：`git submodule update --remote skills/agent-network-skill` 后提交。
 
 ## 发现路径
 
