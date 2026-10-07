@@ -1,0 +1,94 @@
+{
+  "question": "如何让规划者与工人两个 agent 遵循同一份 CommHub MCP 任务协议，可靠完成派发、执行、回报与验收闭环？",
+  "trigger": [
+    "用户要求派任务、收任务、验收或排查任务状态卡住",
+    "新会话的 agent 需要接入 agent-network / commhub MCP",
+    "alias_not_found、任务停在 acked、report_completion 不生效等协议故障"
+  ],
+  "decision": [
+    "按 SKILL.md 规定的角色流程与状态机调用 MCP 工具",
+    "参数不匹配导致状态卡住时按 Gotchas 修复（cancel/retry 或补正确 completion）",
+    "跨机结果判定只信 Hub 任务行，不读对方目录"
+  ],
+  "evidence": [
+    "docs-site/docs/api/mcp-tools.md 工具签名与副作用",
+    "server/src/tools.ts 状态机精确匹配逻辑",
+    "第一轮 tetris 测试的失败复盘与第二轮闭环验证"
+  ],
+  "success_measure": "第二轮测试中规划者按铁律派发、工人按序 ack/working/每任务一次 completion，全部任务在 Hub 上翻为 replied 且验收只读 get_task",
+  "outcome": "双 agent 依同一协议完成可验收的任务闭环",
+  "intended_users": ["agent-network 项目的规划者 agent", "工人 agent", "操作者"],
+  "input_types": ["任务指令", "MCP 工具响应"],
+  "output_artifacts": ["Hub 任务状态流转", "completions 结果记录"],
+  "use_cases": ["任务派发", "任务消费", "状态验收", "协议排错"],
+  "examples": [
+    {
+      "invocation": "/agent-network-skill 拆本轮任务并派给 pi-worker",
+      "description": "规划者按自包含、ttl 86400、在你的工作目录等铁律派发"
+    },
+    {
+      "invocation": "/agent-network-skill 收任务并按协议汇报（工人侧）",
+      "description": "工人按建档、ack、working 原文、每任务一次 completion 的顺序消费"
+    }
+  ],
+  "permissions_systems": [
+    "调用 http://127.0.0.1:9200/mcp 的 CommHub MCP 工具",
+    "读取环境变量中的 Hub token",
+    "读写本项目 git 仓库"
+  ],
+  "typical_completion_time": "5-60 minutes",
+  "compatibility": {
+    "declared": ["opencode", "pi", "codex", "claude-code"],
+    "certified": []
+  },
+  "environment": {
+    "documentation_sources": [
+      "agent-network docs-site/docs/api/mcp-tools.md",
+      "agent-network server/src/tools.ts"
+    ],
+    "data_sources": ["CommHub MCP tools/call 响应"],
+    "required_capabilities": [
+      "HTTP POST 到 http://127.0.0.1:9200/mcp",
+      "读取环境变量中的 Hub token",
+      "按 SKILL.md 调用 MCP 工具"
+    ],
+    "readiness_checks": [
+      "MCP 工具集可见（connected）",
+      "token 环境变量存在且类型正确（规划者 atok / 工人 ntok）",
+      "工人 alias 已在 Hub sessions 建档"
+    ]
+  },
+  "risk": {
+    "tier": "moderate",
+    "permissions": [
+      "向 Hub 派发任务（send_task 会触发收件方 AI）",
+      "修改 Hub 任务与会话状态",
+      "读写本项目 git 仓库"
+    ],
+    "mutation_boundary": "approval-required",
+    "approval_required": ["派发与验收由操作者口令触发，规划者派完即停"]
+  },
+  "software_mutation": {
+    "applies": false
+  },
+  "data_interfaces": {
+    "applies": false
+  },
+  "semantic_contract": {
+    "applies": false
+  },
+  "routing_tests": {
+    "should_trigger": [
+      "把实现 X 的任务派给 pi-worker",
+      "收任务并按协议汇报",
+      "任务卡在 acked 怎么修",
+      "验收 pi-worker 的任务"
+    ],
+    "should_not_trigger": [
+      "修改 opencode 自身配置",
+      "部署或升级 CommHub 服务器",
+      "启动 agent-node 运行时"
+    ]
+  },
+  "support_tier": "supported"
+}
