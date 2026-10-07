@@ -77,8 +77,10 @@ curl -s http://127.0.0.1:9200/mcp \
 **手动三段式，不轮询、不自作主张**：
 
 1. **拆任务**：每个任务必须自包含（背景 + 要做什么 + 完成判据），并明确写
-   「**在你的工作目录完成**」（跨机禁忌见第 4 节）；统一
-   `ttl_seconds: 86400`；`alias` 由人口头指定（默认 `pi-worker`）。
+   「**在你的工作目录完成**」（跨机禁忌见第 4 节）；**任务内容禁止出现任何
+   绝对路径**（派发方、接收方机器的都不行）——需要指明文件位置时一律用
+   相对路径（如 `src/game.js`）。统一 `ttl_seconds: 86400`；
+   `alias` 由人口头指定（默认 `pi-worker`）。
 2. **派发**：`send_task({ alias, task, ttl_seconds: 86400, from_session: "指挥室" })`；
    一次派完**停下**，等人工口令再进入下一步。
 3. **验收**：收到「验收」口令后，对每个任务 `get_task({ task_id })` 逐个点查，
@@ -129,15 +131,21 @@ curl -s http://127.0.0.1:9200/mcp \
 
 ## 4. 跨机 / 双目录约定
 
-本项目是**同一仓库的两个 clone**（双机模拟）：
+> 下表是 tetris 测试环境的**示例**，路径随项目/机器变化。任何项目都在任意
+> 路径下工作，写死路径没有意义——规则只有下面的条目，与具体路径无关。
 
-| 角色 | 工作目录 | Git |
+本示例是**同一仓库的两个 clone**（双机模拟）：
+
+| 角色 | 工作目录（示例） | Git |
 |---|---|---|
 | 规划者 opencode | `~/Downloads/tetris` | 同一 `main`，push/pull 协作 |
 | 工人 pi | `~/Downloads/pi-work/tetris` | 同一 `main`，push/pull 协作 |
 
 - **禁止跨目录假设**：不要读「对方目录」的文件来判断对方状态或结果；
   任务文案必须写「在你的工作目录完成」。
+- **禁止写死路径**：任务文案、交付说明里不得出现 `/home/...`、`C:\...`
+  之类的绝对路径——你无法验证对方机器的目录结构。即使 `get_all_status`
+  显示了对方 `project_dir`，也不要抄进任务（可能是旧记录，换机器即失效）。
 - 工件交换只经 `report_completion.result` / `artifacts`（文本/路径列表）与 git push。
 - 状态判定只信 Hub：规划者用 `get_task`/`list_tasks`/`get_all_status`；
   工人用 `get_inbox`。
@@ -175,3 +183,6 @@ git add skills .agents/skills && git commit -m "add agent-network-skill"
 - Hub 时间是 UTC（本地 UTC+8），对时间戳别直接比较。
 - pi 的 codemode 调用形态是 `tools.mcp__commhub__*`，不是裸工具名；
   opencode 端以 MCP 工具列表里的名字为准。
+- 任务文案里出现 `/home/...` 之类的绝对路径 = 跨机假设（实测：规划者曾把
+  工人的绝对路径写进任务，换机器即坏）。只写「在你的工作目录」+ 相对路径；
+  Hub 没有「修改任务」工具，已派任务文案不可变，只能 cancel 后重新 send。
