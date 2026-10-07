@@ -22,9 +22,10 @@ provenance:
 
 # /agent-network-skill
 
-通过 CommHub MCP 完成「派任务 → 干活 → 回报 → 验收」闭环的统一协议。规划者（opencode
-侧，指挥室）与工人（pi 侧，执行者）任一方加载本文件即可知道该做什么；两边规则同源，
-不再各写一份说明。
+通过 CommHub MCP 完成「派任务 → 干活 → 回报 → 验收」闭环的统一协议。规划者（指挥室）与
+工人（执行者）两个角色的规则都在本文件里；**角色由操作者的口令指定**——例如「请帮我规划
+开发任务到 agent-network」即按第 1 节规划者流程执行，「收任务」即按第 2 节工人流程执行。
+项目里不需要任何角色声明或说明文件。
 
 ## 何时触发
 
@@ -140,6 +141,22 @@ curl -s http://127.0.0.1:9200/mcp \
 - 工件交换只经 `report_completion.result` / `artifacts`（文本/路径列表）与 git push。
 - 状态判定只信 Hub：规划者用 `get_task`/`list_tasks`/`get_all_status`；
   工人用 `get_inbox`。
+
+## 5. 新项目接入清单（能力即齐）
+
+其他项目要具备 agent-network 能力只需两步，**不需要任何项目级说明文件**：
+
+1. **接 MCP**（本机全局配置，做一次即可）：见第 0 节接入命令与 token 分层。
+2. **引 skill**（随仓库分发）：
+
+```bash
+mkdir -p skills .agents/skills
+git submodule add git@github.com:pixb/agent-network-skill.git skills/agent-network-skill
+ln -s ../../skills/agent-network-skill .agents/skills/agent-network-skill
+git add skills .agents/skills && git commit -m "add agent-network-skill"
+```
+
+角色、流程、状态机、铁律全部在本 skill 内，由操作者的口令激活。
 
 ## Gotchas
 
