@@ -4,19 +4,20 @@ description: >-
   CommHub MCP 双向任务协议：规划者用 send_task / get_task / list_tasks 派发与验收任务，
   工人用 get_inbox / ack_inbox / report_status / report_completion 接活与汇报。覆盖 token
   分层（utok/atok/ntok）、任务生命周期状态机、精确匹配参数铁律、跨机双目录约定与手动三段式
-  流程。触发词：派任务、收任务、验收、查 inbox、任务卡在 acked、alias_not_found、
-  report_completion 不生效、commhub、agent-network、MCP 工人、指挥室。
+  流程；需求池模式（不指定工人的任务、requirements_*、认领）。触发词：派任务、收任务、验收、
+  查 inbox、任务卡在 acked、alias_not_found、report_completion 不生效、commhub、agent-network、
+  MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务。
 license: MIT
 activation: /agent-network-skill
 metadata:
   author: pixb
-  version: 0.1.0
+  version: 0.2.0
   created: 2026-10-07
-  last_reviewed: 2026-10-07
+  last_reviewed: 2026-10-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.1.0
+  version: 0.2.0
   created: 2026-10-07
 ---
 
@@ -65,9 +66,9 @@ curl -s http://127.0.0.1:9200/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}'
 ```
 
-- 工具集以实际 MCP 列表为准（本项目 preview.47 共 57 个工具，无
-  `requirements_*` 需求池工具——那是 preview.75+ 看板功能；查询用
-  `list_tasks` / `get_task` / `get_all_status`）。
+- 工具集以实际 MCP 列表为准（任务类 `send_task` / `list_tasks` / `get_task` 等；
+  需求池类 `requirements_*` 需要 Hub ≥ preview.66——`tools/list` 里没有就说明
+  Hub 版本过旧，用 `anet hub start --version <版本>` 升级，见第 6 节）。
 
 ## 1. 角色 A：规划者（指挥室）
 
@@ -85,6 +86,9 @@ curl -s http://127.0.0.1:9200/mcp \
    一次派完**停下**，等人工口令再进入下一步。
 3. **验收**：收到「验收」口令后，对每个任务 `get_task({ task_id })` 逐个点查，
    期望 `status: "replied"` 且有 `result`。**只信 Hub 返回的任务行**。
+
+派发有两条路：**定向**（上面的 `send_task` 指定 alias）与**池化**（不指定工人、
+先入需求池再由操作者手动认领）——池化流程见第 6 节。
 
 ## 2. 角色 B：工人（执行者）
 
@@ -165,6 +169,35 @@ git add skills .agents/skills && git commit -m "add agent-network-skill"
 ```
 
 角色、流程、状态机、铁律全部在本 skill 内，由操作者的口令激活。
+
+## 6. 需求池模式：不指定工人的任务（Hub ≥ preview.66）
+
+指挥者两种派发：**定向**（第 1 节）与**池化**（本节）。池化 = 任务先发布为需求池
+卡片（`column: pool`），由操作者按各工人的**模型额度**与**繁忙程度**手动认领给具体
+工人。需求池是 `requirements_*` 卡片看板，与 tasks 表是两套记录、**之间没有自动桥**
+——认领时把卡片正文人肉派成 `send_task`（两步都做，缺一不可）。
+
+- **发布**（规划者/操作者）：
+  `requirements_create({ name: "<≤80 字标题>", description: "<任务正文 markdown ≤20k>", column: "pool", priority })`
+- **看池**：`requirements_list({ status: "pool" })`
+  - list 的过滤参数是 **`status`**，不是 `column`（create/update 两者皆可，list 只认 `status`）；
+  - 默认**排除**归档卡，`include_archived: true` 才列出；
+  - 分页 `limit`/`cursor`，搜索 `q`，视图默认 summary（正文要 `view: "full"`）。
+- **认领**（操作者手动两步）：
+  1. 选工人：`get_all_status` 看忙闲、`send_task` 回执的 `target_busy` /
+     `est_wait_minutes` 作参考；模型额度由操作者人工判断。
+  2. 派活 + 记账：
+     `send_task({ alias: <选定工人>, task: <卡片 description 正文>, ttl_seconds: 86400, from_session: "指挥室" })`
+     + `requirements_update({ id, column: "doing", agent_owner: { kind: "node", alias } })`
+- **验收**：工人回单后 `get_task` 点查 → 过了
+  `requirements_update({ id, column: "done" })`；打回 = `cancel_task` + 改写重发
+  （第 3 节铁律不变），卡片留在 `doing` 继续跟。
+- **注意**：agent 不能删卡，只能 `archived: true` 隐藏；卡片另有 due/checklist/
+  tags/participants（人）/external_ref（外部系统幂等同步）等字段按需填。
+- **版本前提**：`requirements_*` 自 preview.66 进入主干；升级用
+  `anet hub start --version 0.9.0-preview.<N>`（anet 的 floor 兜底版本没有这些
+  工具）。pm2 守护时要把 `--version` 写进 ecosystem 的 args，否则重启会回退到
+  floor 版本、工具消失。
 
 ## Gotchas
 
