@@ -6,18 +6,19 @@ description: >-
   分层（utok/atok/ntok）与从零获取方式、任务生命周期状态机、精确匹配参数铁律、跨机路径
   无关约定与手动三段式流程；需求池模式（不指定工人的任务、requirements_*、认领）。触发词：
   派任务、收任务、验收、查 inbox、任务卡在 acked、alias_not_found、report_completion 不
-  生效、commhub、agent-network、MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务。
+  生效、commhub、agent-network、MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务、
+  dashboard 节点卡片任务文本被截断/像半句话。
 license: MIT
 activation: /agent-network-skill
 metadata:
   author: pixb
-  version: 0.3.1
+  version: 0.3.2
   created: 2026-10-07
   last_reviewed: 2026-10-19
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.3.1
+  version: 0.3.2
   created: 2026-10-07
 ---
 
@@ -159,6 +160,13 @@ curl -s http://127.0.0.1:9200/mcp \
   上下文（对方看不到）。
 - **一条任务一件事**：不要在一段正文里塞多个交付物，否则状态机与回报都会糊。
 - **TTL**：轮次内即验的用默认 3600s；跨小时/夜里跑的显式给 86400s。
+- **首行是一行摘要**（dashboard 节点卡片上显示的就是它）：正文**第 1 行**写一行式摘要，
+  ≤80 字，并保证**前 200 字符内自成完整一句**；首行之后**空一行**再写背景/步骤/验收的
+  markdown。原因：`sessions.task` 只存正文**前 200 字符**，而且是**盲切**——不看句子、
+  不看换行边界；dashboard 节点卡片、`get_all_status`、`/api/status` 读的都是这一列。
+  完整正文（≤10000 字符）在 `get_inbox` / `get_task` 里完整可见，所以别把长段落、代码块、
+  大段粘贴放在最前面。工人侧不受影响：`report_status(status="working", task=…)` 仍必须传
+  **完整原文**（精确等值匹配才进 `running`），首行摘要只是派单方的写法。
 - **不写绝对路径**（见第 4 节）。
 
 ## 2. 角色 B：工人（执行者）
@@ -284,3 +292,6 @@ SKILL.md 就在仓库根（不再套一层 `skills/` 容器目录 + 符号链接
   撤销 / 「这枚是谁的」排查见 §0.1.1。
 - **别拿 `anet` CLI 派活**：`anet` 没有 `send_task` / `get_inbox` / `report_*` 命令，协议只
   在 MCP 上（见 §0.3）。
+- **节点卡片上的任务文本像半句话/带乱换行**：不是 hub 坏了——`sessions.task` 只留正文前
+  200 字符且**盲切**（不看句子/换行边界）。派单时正文首行写一行摘要即可（见第 1 节
+  「首行是一行摘要」）；`get_inbox` / `get_task` 里正文始终完整。
