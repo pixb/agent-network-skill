@@ -11,13 +11,13 @@ license: MIT
 activation: /agent-network-skill
 metadata:
   author: pixb
-  version: 0.3.0
+  version: 0.3.1
   created: 2026-10-07
   last_reviewed: 2026-10-19
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.3.0
+  version: 0.3.1
   created: 2026-10-07
 ---
 
@@ -56,7 +56,7 @@ provenance:
 | 令牌 | 谁用 | 能干什么 |
 |---|---|---|
 | `utok_` | 人（登录得到） | 人的工具（管项目、浏览节点文件/日志）+ 所有协作工具；不绑网络，按该用户可见的网络判 |
-| `atok_` | 脚本 / 规划者 agent | 同上，专为自动化签发 |
+| `atok_` | 脚本 / 需要长期不过期凭据的客户端 | 与 `utok_` 同一权限面（hub 里就是 `scope=full`），好处只是**不过期**；规划者用本机登录到的 `utok_` 就够，别多签 |
 | `ntok_` | 节点（工人） | 唯一能调**节点专属**工具的（`report_status`、`org_whoami`、`schedule_*` 等）；绑网络 + 节点身份 |
 
 **令牌不是可选项。** hub 默认就是开启鉴权的 V3：`/mcp` 第一步就鉴权，缺令牌直接
@@ -75,6 +75,29 @@ provenance:
    它的 MCP 子进程，**工人侧不需要手工贴令牌**。
 
 CLI 取令牌的顺序：`--token` → 环境变量 `COMMHUB_TOKEN` → `~/.anet/config.json`。
+
+### 0.1.1 令牌运维与排错（撤销不可逆，先看清再动）
+
+- **每次登录新增一枚，旧的不失效**：`anet login`（CLI / dashboard / 第二台机器）各发一枚
+  utok，**不轮换、不踢掉旧的**。所以 `anet token ls` 里一长串 `user-login` 是正常的；
+  实用做法是**一台机器留一枚**，机器退役时撤掉它那枚。
+- **谁会闲置失效**：utok（`scope='user'`、不绑网络）闲置 `COMMHUB_SESSION_IDLE_DAYS` 天
+  （默认 30，设 0 = 关闭）后失效；**`atok_` 与 `ntok_` 永不过期**（长期凭据，只能主动撤）。
+- **`last_used_at` 是小时粒度**（最多每小时写一次），别拿它当秒级在场证据。
+- **hub 只存 sha256、不记 IP**：明文反查不到，也查不到「哪台机器在用」。认领一枚令牌只能看
+  登录元数据：CLI 登录是 `kind=cli` + `client_label`「`anet <版本> · <主机> · <子命令>`」；
+  **dashboard / 浏览器 / app 登录是 `kind=login` 且没有 label**。
+- **确认「本机在用的是哪枚」**：`anet token ls` 只给 ID，认 ID 得看元数据；能读 hub 库时用
+  `printf %s '<明文>' | sha256sum` 与 `api_tokens.token_hash` 比对（`hashToken()` = sha256
+  裸 hex），明文来自本机配置（`~/.anet/config.json` 的 `token` 字段）。
+- **`anet token revoke <token-id>` 是硬删除、没有 undo**，且只接受用户令牌（节点令牌被拒）。
+  撤掉某节点的 ntok = 那台节点**下次启动 401**，必须重新 `anet node create`。**动手前先备份
+  hub 数据库（连同 `-wal` / `-shm`）**。
+- **`Session expired. Run: anet login`** = 你这枚登录令牌被撤了或闲置到期；重登即可，
+  **其他机器不受影响**（登录不轮换别人的令牌）。
+- **`anet token ls` 不够看**：只有 ID / NAME / CREATED / LAST USED，**没有 label/kind**，且时间
+  是 **UTC**（比本地早 8 小时，别把刚建的令牌当成「昨天的」）。要看设备 / 当前会话用
+  `GET /api/auth/sessions`（带 `is_current`，需用户令牌）。
 
 ### 0.2 接入命令
 
@@ -102,6 +125,7 @@ curl -s http://127.0.0.1:9200/mcp \
 | 要干的事 | 界面 |
 |---|---|
 | 装/起 hub、登录、签发令牌、建/停节点、看配置 | `anet` CLI |
+| **自证身份 / 审计令牌**（谁在用什么令牌） | `anet whoami`（我是谁 + 当前 hub/网络）、`anet token ls`（这名下的全部令牌；细则见 §0.1.1） |
 | **看**任务（只读） | `anet tasks [status]`、`anet status`、`anet logs <name>` |
 | 派活、收件箱、ack、报 working、报完成 | **MCP 工具**（`anet` 没有这些命令） |
 | 人想在脚本里派活 / 确认 | REST：`POST /api/task`（派）、`POST /api/messages/ack`（确认）；`GET /api/tasks`、`GET /api/completions`。`report_status` / `report_completion` **没有** REST，只能在 MCP 上做 |
@@ -256,6 +280,7 @@ SKILL.md 就在仓库根（不再套一层 `skills/` 容器目录 + 符号链接
 - **环境变量污染**：多机同会话/多 hub 并存时，`COMMHUB_URL` / `COMMHUB_TOKEN` 会串；用
   `env -u COMMHUB_URL -u COMMHUB_TOKEN` 或显式传参净化后重跑。
 - **MCP 返回 `401 unauthorized`**：先确认令牌，不要以为 hub 坏了——`anet whoami` 或第 0.2 节
-  的 curl 可自查；缺令牌时 `/mcp` 的**任何**工具都调不了。
+  的 curl 可自查；缺令牌时 `/mcp` 的**任何**工具都调不了。令牌的发放 / 失效（闲置过期）/
+  撤销 / 「这枚是谁的」排查见 §0.1.1。
 - **别拿 `anet` CLI 派活**：`anet` 没有 `send_task` / `get_inbox` / `report_*` 命令，协议只
   在 MCP 上（见 §0.3）。

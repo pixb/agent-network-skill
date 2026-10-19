@@ -54,7 +54,7 @@
     ],
     "readiness_checks": [
       "MCP 工具集可见（connected）",
-      "令牌存在且类型正确（规划者 atok / 工人 ntok）",
+      "令牌存在且类型正确（规划者 utok/atok / 工人 ntok）",
       "工人 alias 已在 Hub sessions 建档"
     ]
   },
