@@ -1,20 +1,20 @@
 # agent-network-skill
 
-通过 CommHub MCP 完成「派任务 → 干活 → 回报 → 验收」闭环的统一协议技能，供任意接入
-本技能的项目里的规划者（指挥室）与工人（执行者）共用。
+The unified protocol skill for the "dispatch → work → report → verify" loop over CommHub MCP, shared
+by the planner (control room) and the worker (executor) in any project that mounts this skill.
 
-## 用途
+## Purpose
 
-一份协议、两个角色：任何读取本目录的 agent 都能知道自己在闭环里该调哪些 MCP 工具、按
-什么顺序、参数有什么硬约束。
+One protocol, two roles: any agent that reads this directory knows which MCP tools it should call in
+the loop, in what order, and which parameter constraints are hard limits.
 
-## 触发
+## Triggers
 
-- 派任务 / 收任务 / 验收 / 查 inbox
-- `alias_not_found`、任务卡在 acked/running、`report_completion` 后状态没变
-- 跨机协作、双目录（两个 clone）任务分工
+- Dispatch a task / take a task / verify work / check inbox
+- `alias_not_found`, a task stuck in acked or running, status unchanged after `report_completion`
+- Cross-machine collaboration, dual-directory task split (two clones)
 
-## 内容
+## Contents
 
-完整的连接前提、令牌分层、角色流程、状态机、参数铁律与 Gotchas 见
-[SKILL.md](SKILL.md)。安装与发现方式见 [README.md](README.md)。
+The complete prerequisites, token tiers, role flows, state machine, parameter hard rules and
+Gotchas are in [SKILL.md](SKILL.md). Installation and discovery are in [README.md](README.md).

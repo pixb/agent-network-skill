@@ -1,40 +1,40 @@
 {
-  "question": "如何让规划者与工人两个 agent 遵循同一份 CommHub MCP 任务协议，可靠完成派发、执行、回报与验收闭环？",
+  "question": "How do two agents — a planner and a worker — follow one CommHub MCP task protocol to reliably complete the dispatch, execution, reporting and verification loop?",
   "trigger": [
-    "用户要求派任务、收任务、验收或排查任务状态卡住",
-    "新会话的 agent 需要接入 commhub / agent-network MCP",
-    "alias_not_found、任务停在 acked、report_completion 不生效等协议故障"
+    "The user asks to dispatch a task, take a task, verify work, or debug a stalled task",
+    "A new session's agent needs to connect to the commhub / agent-network MCP",
+    "Protocol failures such as alias_not_found, a task stopped in acked, or report_completion having no effect"
   ],
   "decision": [
-    "按 SKILL.md 规定的角色流程与状态机调用 MCP 工具",
-    "参数不匹配导致状态卡住时按 Gotchas 修复（cancel/retry 或补正确的 completion）",
-    "跨机结果判定只信 Hub 任务行，不读对方目录"
+    "Call the MCP tools according to the role flows and state machine defined in SKILL.md",
+    "When a parameter mismatch stalls the state, repair it per Gotchas (cancel/retry, or add the correct completion)",
+    "Judge cross-machine results from the hub task row only — never read the other side's directory"
   ],
   "evidence": [
-    "CommHub 源树 docs-site/docs/api/mcp-tools.md 的工具签名与副作用",
-    "CommHub 源树 server/src/tools.ts 的状态机精确匹配逻辑",
-    "跨机双 agent 闭环的失败复盘与验证（任务正文精确匹配、ack/working/completion 顺序）"
+    "CommHub source tree docs-site/docs/api/mcp-tools.md — tool signatures and side effects",
+    "CommHub source tree server/src/tools.ts — the state machine's exact-match logic",
+    "Postmortems and verification of the cross-machine two-agent loop (exact task-body matching, ack/working/completion order)"
   ],
-  "success_measure": "规划者按铁律派发、工人按序 ack/working/每任务一次 completion，全部任务在 Hub 上翻为 replied 且验收只读 get_task",
-  "outcome": "双 agent 依同一协议完成可验收的任务闭环",
-  "intended_users": ["规划者 agent（指挥室）", "工人 agent（执行者）", "操作者"],
-  "input_types": ["任务指令", "MCP 工具响应"],
-  "output_artifacts": ["Hub 任务状态流转", "completions 结果记录"],
-  "use_cases": ["任务派发", "任务消费", "状态验收", "协议排错"],
+  "success_measure": "The planner dispatches per the hard rules and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task",
+  "outcome": "Two agents complete a verifiable task loop under one protocol",
+  "intended_users": ["planner agent (control room)", "worker agent (executor)", "human operator"],
+  "input_types": ["task instructions", "MCP tool responses"],
+  "output_artifacts": ["hub task state transitions", "completions result records"],
+  "use_cases": ["task dispatch", "task consumption", "status verification", "protocol troubleshooting"],
   "examples": [
     {
-      "invocation": "/agent-network-skill 拆本轮任务并派给 <worker-alias>",
-      "description": "规划者按自包含、ttl 86400、在你的工作目录等铁律派发"
+      "invocation": "/agent-network-skill split this round's work and dispatch it to <worker-alias>",
+      "description": "The planner dispatches per the hard rules: self-contained body, ttl 86400, \"do it in your working directory\""
     },
     {
-      "invocation": "/agent-network-skill 收任务并按协议汇报（工人侧）",
-      "description": "工人按建档、ack、working 原文、每任务一次 completion 的顺序消费"
+      "invocation": "/agent-network-skill take a task and report per protocol (worker side)",
+      "description": "The worker consumes in order: register, ack, working with the verbatim body, exactly one completion per task"
     }
   ],
   "permissions_systems": [
-    "调用 <hub>/mcp 的 CommHub MCP 工具",
-    "读取环境变量或本机配置中的 Hub 令牌",
-    "读写接入本技能的项目的 git 仓库"
+    "Call CommHub MCP tools on <hub>/mcp",
+    "Read the hub token from an environment variable or local config",
+    "Read and write the git repository of the project that mounted this skill"
   ],
   "typical_completion_time": "5-60 minutes",
   "compatibility": {
@@ -43,30 +43,30 @@
   },
   "environment": {
     "documentation_sources": [
-      "CommHub 源树 docs-site/docs/api/mcp-tools.md",
-      "CommHub 源树 server/src/tools.ts"
+      "CommHub source tree docs-site/docs/api/mcp-tools.md",
+      "CommHub source tree server/src/tools.ts"
     ],
-    "data_sources": ["CommHub MCP tools/call 响应"],
+    "data_sources": ["CommHub MCP tools/call responses"],
     "required_capabilities": [
-      "HTTP POST 到 <hub>/mcp（本地默认 http://127.0.0.1:9200/mcp）",
-      "读取环境变量或本机配置中的 Hub 令牌",
-      "按 SKILL.md 调用 MCP 工具"
+      "HTTP POST to <hub>/mcp (local default http://127.0.0.1:9200/mcp)",
+      "Read the hub token from an environment variable or local config",
+      "Call the MCP tools as specified in SKILL.md"
     ],
     "readiness_checks": [
-      "MCP 工具集可见（connected）",
-      "令牌存在且类型正确（规划者 utok/atok / 工人 ntok）",
-      "工人 alias 已在 Hub sessions 建档"
+      "The MCP tool set is visible (connected)",
+      "The token exists and is the right kind (planner: utok/atok; worker: ntok)",
+      "The worker alias already has a session row on the hub"
     ]
   },
   "risk": {
     "tier": "moderate",
     "permissions": [
-      "向 Hub 派发任务（send_task 会触发收件方 AI）",
-      "修改 Hub 任务与会话状态",
-      "读写接入本技能的项目的 git 仓库"
+      "Dispatch tasks to the hub (send_task wakes the recipient AI)",
+      "Modify hub task and session state",
+      "Read and write the git repository of the project that mounted this skill"
     ],
     "mutation_boundary": "approval-required",
-    "approval_required": ["派发与验收由操作者口令触发，规划者派完即停"]
+    "approval_required": ["Dispatching and verifying are triggered by the operator's instruction; the planner stops once dispatches are sent"]
   },
   "software_mutation": {
     "applies": false
@@ -79,15 +79,18 @@
   },
   "routing_tests": {
     "should_trigger": [
-      "把实现 X 的任务派给 <worker-alias>",
+      "dispatch the task \"implement X\" to <worker-alias>",
+      "take a task and report per protocol",
+      "how do I fix a task stuck in acked",
+      "verify <worker-alias>'s tasks",
+      "派任务给 <worker-alias>",
       "收任务并按协议汇报",
-      "任务卡在 acked 怎么修",
-      "验收 <worker-alias> 的任务"
+      "任务卡在 acked 怎么修"
     ],
     "should_not_trigger": [
-      "修改 opencode 自身配置",
-      "部署或升级 CommHub 服务器",
-      "启动 agent-node 运行时"
+      "edit opencode's own configuration",
+      "deploy or upgrade the CommHub server",
+      "start the agent-node runtime"
     ]
   },
   "support_tier": "supported"

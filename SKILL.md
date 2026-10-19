@@ -1,115 +1,132 @@
 ---
 name: agent-network-skill
 description: >-
-  CommHub MCP 双向任务协议：规划者用 send_task / get_task / list_tasks 派发与验收任务，
-  工人用 get_inbox / ack_inbox / report_status / report_completion 接活与汇报。覆盖令牌
-  分层（utok/atok/ntok）与从零获取方式、任务生命周期状态机、精确匹配参数铁律、跨机路径
-  无关约定与手动三段式流程；需求池模式（不指定工人的任务、requirements_*、认领）。触发词：
-  派任务、收任务、验收、查 inbox、任务卡在 acked、alias_not_found、report_completion 不
-  生效、commhub、agent-network、MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务、
-  dashboard 节点卡片任务文本被截断/像半句话。
+  CommHub MCP two-way task protocol: planners dispatch and verify work with send_task / get_task /
+  list_tasks; workers take it and report back with get_inbox / ack_inbox / report_status /
+  report_completion. Covers token tiers (utok/atok/ntok) and how to obtain each from scratch, the
+  task lifecycle state machine, the exact-match parameter rules, cross-machine path-independent
+  conventions and the manual three-step flow; requirement-pool mode (tasks with no named worker,
+  requirements_*, claiming). Triggers: dispatch a task, take a task, verify work, check inbox, task
+  stuck in acked, alias_not_found, report_completion has no effect, commhub, agent-network, MCP
+  worker, control room, requirement pool, publish a task without naming a worker, claim a task,
+  dashboard node card shows truncated task text. Chinese triggers (keep matching these): 派任务、
+  收任务、验收、查 inbox、任务卡在 acked、alias_not_found、report_completion 不生效、commhub、
+  agent-network、MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务、dashboard 节点卡片任务文本被截断。
 license: MIT
 activation: /agent-network-skill
 metadata:
   author: pixb
-  version: 0.3.2
+  version: 0.4.0
   created: 2026-10-07
   last_reviewed: 2026-10-19
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.3.2
+  version: 0.4.0
   created: 2026-10-07
 ---
 
 # /agent-network-skill
 
-通过 CommHub MCP 完成「派任务 → 干活 → 回报 → 验收」闭环的统一协议。规划者（指挥室）
-与工人（执行者）两个角色的规则都在本文件里；**角色由操作者的口令指定**——例如「请帮我
-规划开发任务到 agent-network」即按第 1 节规划者流程执行，「收任务」即按第 2 节工人流程
-执行。本技能与具体项目无关：任何项目把它挂进 `.agents/skills/` 即可，不需要项目级说明
-文件。
+The unified protocol for the "dispatch → work → report → verify" loop over CommHub MCP. The rules
+for both roles — planner (control room) and worker (executor) — live in this file. **The operator's
+wording picks the role**: "plan a dev task onto agent-network" means follow §1, "take a task" means
+follow §2. The skill is project-independent: drop it into any project's `.agents/skills/` and it
+works, with no project-level documentation file required.
 
-## 何时触发
+## When this skill triggers
 
-**看工具，不看词**：只要可见工具名是 `mcp__*__send_task` / `mcp__*__get_inbox` /
-`mcp__*__report_completion` 这一族（不带前缀也可），就默认为「派任务到 commhub」——
-说明操作者在这个 MCP 客户端上登录了这个 CommHub，通常在指挥室或 MCP 客户端开发容器里。
-典型触发：「派任务到 agent-network」「规划开发任务并派给 <worker-alias>」「开发一个 X 并
-派发」「收任务」「验收」「查 inbox」「任务卡在 acked」「alias_not_found」「report_completion
-不生效」。
+**Look at the tools, not the words.** If the visible tool names are the `mcp__*__send_task` /
+`mcp__*__get_inbox` / `mcp__*__report_completion` family (with or without the prefix), assume
+"dispatch a task over commhub" — it means the operator is logged into this CommHub on this MCP
+client, usually in the control room or an MCP-client dev container. Typical triggers: "dispatch a
+task onto agent-network", "plan dev tasks and hand them to <worker-alias>", "build X and dispatch
+it", "take a task", "verify", "check inbox", "task stuck in acked", "alias_not_found",
+"report_completion has no effect".
 
-调用示例：
+Invocation examples:
 
-- `/agent-network-skill 检查 commhub 连接与我的令牌`
-- `/agent-network-skill 拆本轮任务并派给 <worker-alias>，ttl 86400`
-- `/agent-network-skill 收任务并按协议汇报`
-- `/agent-network-skill 验收 <worker-alias> 的全部任务`
+- `/agent-network-skill check the commhub connection and my token`
+- `/agent-network-skill split this round's work and dispatch it to <worker-alias>, ttl 86400`
+- `/agent-network-skill take a task and report per protocol`
+- `/agent-network-skill verify every task for <worker-alias>`
 
-## 0. 前提：连接、令牌与工具面
+## 0. Prerequisites: connection, tokens, tool surface
 
-**端点**：`POST <hub>/mcp`（Streamable HTTP；本地默认 `http://127.0.0.1:9200/mcp`，hub 端口
-默认 9200）。请求头必须带 `Content-Type: application/json` 与
-`Accept: application/json, text/event-stream`；响应是 SSE，取 `data:` 行。
+**Endpoint**: `POST <hub>/mcp` (Streamable HTTP; local default `http://127.0.0.1:9200/mcp`, hub port
+defaults to 9200). Headers must carry `Content-Type: application/json` and
+`Accept: application/json, text/event-stream`; the response is SSE — read the `data:` lines.
 
-### 0.1 令牌三层（值只走环境变量或本机配置，**永不入库**）
+### 0.1 The three token tiers (values live in env vars or local config, **never in a repo**)
 
-| 令牌 | 谁用 | 能干什么 |
+| Token | Who uses it | What it can do |
 |---|---|---|
-| `utok_` | 人（登录得到） | 人的工具（管项目、浏览节点文件/日志）+ 所有协作工具；不绑网络，按该用户可见的网络判 |
-| `atok_` | 脚本 / 需要长期不过期凭据的客户端 | 与 `utok_` 同一权限面（hub 里就是 `scope=full`），好处只是**不过期**；规划者用本机登录到的 `utok_` 就够，别多签 |
-| `ntok_` | 节点（工人） | 唯一能调**节点专属**工具的（`report_status`、`org_whoami`、`schedule_*` 等）；绑网络 + 节点身份 |
+| `utok_` | A person (issued at login) | Human tools (manage projects, browse node files/logs) + every collaboration tool; not bound to a network — scoped by the networks that user can see |
+| `atok_` | Scripts / clients that need a credential that never expires | Exactly the same permission surface as `utok_` (it is `scope=full` in the hub); the only benefit is that it **never expires**. A planner using the `utok_` it already logged in with is enough — don't mint extra |
+| `ntok_` | A node (worker) | The only token that can call **node-only** tools (`report_status`, `org_whoami`, `schedule_*`, …); bound to a network + node identity |
 
-**令牌不是可选项。** hub 默认就是开启鉴权的 V3：`/mcp` 第一步就鉴权，缺令牌直接
-`401 unauthorized`；`anet node create` 在本地就被挡住（`❌ Not logged in. Run: anet login`，
-`exit 1`）。只有 hub 以 `--dev-open` 启动（且未设 `COMMHUB_AUTH_TOKEN`）时 hub 侧才放行
-——但 CLI 那道本地门**依旧在**。所以「我没配过令牌」不等于「没有令牌」。
+**A token is not optional.** The hub ships with V3 auth on: the very first step of `/mcp` is auth,
+and a missing token gives a flat `401 unauthorized`; `anet node create` is blocked locally
+(`❌ Not logged in. Run: anet login`, `exit 1`). The hub side only relents when it was started with
+`--dev-open` (and `COMMHUB_AUTH_TOKEN` is unset) — but the CLI's local gate **still stands**. So
+"I never configured a token" does not mean "there is no token".
 
-**令牌从哪来（从零三步）**：
+**Where tokens come from (three steps from zero)**:
 
-1. `anet register`（在 hub 上建号）或 `anet login --hub <url> --username <user>`（账号 + 密码；
-   自建 hub 的 admin 密码是 `anet hub start` 打印过一次的随机串，不是固定的 `anethub`）。
-   两者成功都会把令牌**写进 `~/.anet/config.json`**（之后不必手工抄）。
-2. `anet token create --name <planner>` —— 给规划者 agent 签一个 `atok_`（明文只显示一次）。
-3. `anet node create <name> --runtime <runtime>` —— 自动为该节点申请 `ntok_` 并写进
-   `.anet/nodes/<name>/config.json`；节点启动时以 `COMMHUB_URL` / `COMMHUB_TOKEN` 注入给
-   它的 MCP 子进程，**工人侧不需要手工贴令牌**。
+1. `anet register` (create the account on the hub) or `anet login --hub <url> --username <user>`
+   (account + password; a self-hosted hub's admin password is the random string `anet hub start`
+   printed once, not a fixed `anethub`). Both write the token into `~/.anet/config.json`, so you
+   never copy it by hand.
+2. `anet token create --name <planner>` — mints an `atok_` for a planner agent (plaintext shown
+   once).
+3. `anet node create <name> --runtime <runtime>` — requests an `ntok_` for that node and writes it
+   into `.anet/nodes/<name>/config.json`; at startup the node injects `COMMHUB_URL` /
+   `COMMHUB_TOKEN` into its MCP subprocess, so **the worker side never pastes a token by hand**.
 
-CLI 取令牌的顺序：`--token` → 环境变量 `COMMHUB_TOKEN` → `~/.anet/config.json`。
+CLI token lookup order: `--token` → env var `COMMHUB_TOKEN` → `~/.anet/config.json`.
 
-### 0.1.1 令牌运维与排错（撤销不可逆，先看清再动）
+### 0.1.1 Token operations and troubleshooting (revocation is irreversible — look before you act)
 
-- **每次登录新增一枚，旧的不失效**：`anet login`（CLI / dashboard / 第二台机器）各发一枚
-  utok，**不轮换、不踢掉旧的**。所以 `anet token ls` 里一长串 `user-login` 是正常的；
-  实用做法是**一台机器留一枚**，机器退役时撤掉它那枚。
-- **谁会闲置失效**：utok（`scope='user'`、不绑网络）闲置 `COMMHUB_SESSION_IDLE_DAYS` 天
-  （默认 30，设 0 = 关闭）后失效；**`atok_` 与 `ntok_` 永不过期**（长期凭据，只能主动撤）。
-- **`last_used_at` 是小时粒度**（最多每小时写一次），别拿它当秒级在场证据。
-- **hub 只存 sha256、不记 IP**：明文反查不到，也查不到「哪台机器在用」。认领一枚令牌只能看
-  登录元数据：CLI 登录是 `kind=cli` + `client_label`「`anet <版本> · <主机> · <子命令>`」；
-  **dashboard / 浏览器 / app 登录是 `kind=login` 且没有 label**。
-- **确认「本机在用的是哪枚」**：`anet token ls` 只给 ID，认 ID 得看元数据；能读 hub 库时用
-  `printf %s '<明文>' | sha256sum` 与 `api_tokens.token_hash` 比对（`hashToken()` = sha256
-  裸 hex），明文来自本机配置（`~/.anet/config.json` 的 `token` 字段）。
-- **`anet token revoke <token-id>` 是硬删除、没有 undo**，且只接受用户令牌（节点令牌被拒）。
-  撤掉某节点的 ntok = 那台节点**下次启动 401**，必须重新 `anet node create`。**动手前先备份
-  hub 数据库（连同 `-wal` / `-shm`）**。
-- **`Session expired. Run: anet login`** = 你这枚登录令牌被撤了或闲置到期；重登即可，
-  **其他机器不受影响**（登录不轮换别人的令牌）。
-- **`anet token ls` 不够看**：只有 ID / NAME / CREATED / LAST USED，**没有 label/kind**，且时间
-  是 **UTC**（比本地早 8 小时，别把刚建的令牌当成「昨天的」）。要看设备 / 当前会话用
-  `GET /api/auth/sessions`（带 `is_current`，需用户令牌）。
+- **Every login adds a token; the old ones stay valid**: `anet login` (CLI / dashboard / a second
+  machine) each issues its own utok and **does not rotate or kick out the previous ones**. So a long
+  list of `user-login` rows in `anet token ls` is normal; the practical rule is **one token per
+  machine**, revoked when that machine is retired.
+- **What actually idle-expires**: a utok (`scope='user'`, not network-bound) expires after
+  `COMMHUB_SESSION_IDLE_DAYS` days of disuse (default 30, 0 = off); **`atok_` and `ntok_` never
+  expire** (long-lived credentials — only manual revocation ends them).
+- **`last_used_at` has hour granularity** (written at most once an hour) — never use it as
+  second-by-second proof of presence.
+- **The hub stores only sha256 and records no IP**: the plaintext cannot be reversed, and "which
+  machine is using this" is unanswerable. The only way to claim a token is login metadata: a CLI
+  login is `kind=cli` + `client_label` "`anet <version> · <host> · <subcommand>`"; **a dashboard /
+  browser / app login is `kind=login` with no label**.
+- **Confirm which token this machine is using**: `anet token ls` gives IDs only; to identify an ID,
+  read the metadata — when you can read the hub DB, compare
+  `printf %s '<plaintext>' | sha256sum` against `api_tokens.token_hash` (`hashToken()` = bare sha256
+  hex), with the plaintext taken from local config (`token` in `~/.anet/config.json`).
+- **`anet token revoke <token-id>` is a hard delete with no undo**, and it accepts user tokens only
+  (node tokens are refused). Revoking a node's ntok = that node gets a **401 on its next start** and
+  must be re-created with `anet node create`. **Back up the hub database (including `-wal` / `-shm`)
+  before touching anything.**
+- **`Session expired. Run: anet login`** = this login token was revoked or idle-expired; log in
+  again — **other machines are unaffected** (logging in does not rotate anyone else's token).
+- **`anet token ls` is not enough**: it shows only ID / NAME / CREATED / LAST USED, **no label or
+  kind**, and its times are **UTC** (8 hours behind local — don't read a token you just created as
+  "yesterday's"). For device / current-session detail use `GET /api/auth/sessions` (includes
+  `is_current`; needs a user token).
 
-### 0.2 接入命令
+### 0.2 Client setup
 
-- opencode（规划者，示例）：
+- opencode (planner, example):
   `opencode mcp add commhub --url http://127.0.0.1:9200/mcp --header "Authorization=Bearer $COMMHUB_TOKEN"`
-- 其他 MCP 客户端同理：把一个有效令牌放进 `Authorization: Bearer <token>` 请求头，令牌用
-  客户端自己的 header / 环境变量配置（变量名随客户端，不必叫 `COMMHUB_TOKEN`）。
-- pi（示例）：`pi mcp add commhub --url http://127.0.0.1:9200/mcp --bearer-token-env-var COMMHUB_TOKEN`
-- 调用形态以你的 MCP 客户端实际暴露的工具名为准（codemode 式客户端形如
-  `tools.mcp__<server>__<tool>`，例如 `tools.mcp__commhub__send_task`）。
-- 通用 JSON-RPC 自查（curl）：
+- Other MCP clients are the same idea: put a valid token in the `Authorization: Bearer <token>`
+  header, configured through the client's own header / env-var mechanism (the variable name is the
+  client's choice — it need not be `COMMHUB_TOKEN`).
+- pi (example):
+  `pi mcp add commhub --url http://127.0.0.1:9200/mcp --bearer-token-env-var COMMHUB_TOKEN`
+- Call shape follows the tool names your MCP client actually exposes (codemode-style clients look
+  like `tools.mcp__<server>__<tool>`, e.g. `tools.mcp__commhub__send_task`).
+- Generic JSON-RPC self-check (curl):
 
 ```bash
 curl -s http://127.0.0.1:9200/mcp \
@@ -119,136 +136,158 @@ curl -s http://127.0.0.1:9200/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}'
 ```
 
-工具集以运行中 hub 的 `tools/list` 为准。
+The tool set is whatever the running hub returns from `tools/list`.
 
-### 0.3 CLI 与 MCP 分工（别拿 `anet` 当协议客户端）
+### 0.3 CLI vs MCP: who does what (don't use `anet` as a protocol client)
 
-| 要干的事 | 界面 |
+| Job | Interface |
 |---|---|
-| 装/起 hub、登录、签发令牌、建/停节点、看配置 | `anet` CLI |
-| **自证身份 / 审计令牌**（谁在用什么令牌） | `anet whoami`（我是谁 + 当前 hub/网络）、`anet token ls`（这名下的全部令牌；细则见 §0.1.1） |
-| **看**任务（只读） | `anet tasks [status]`、`anet status`、`anet logs <name>` |
-| 派活、收件箱、ack、报 working、报完成 | **MCP 工具**（`anet` 没有这些命令） |
-| 人想在脚本里派活 / 确认 | REST：`POST /api/task`（派）、`POST /api/messages/ack`（确认）；`GET /api/tasks`、`GET /api/completions`。`report_status` / `report_completion` **没有** REST，只能在 MCP 上做 |
+| Install/start the hub, log in, issue tokens, create/stop nodes, read config | `anet` CLI |
+| **Prove your identity / audit tokens** (who is using which token) | `anet whoami` (who am I + current hub/network), `anet token ls` (every token under this account; details in §0.1.1) |
+| **Look at** tasks (read-only) | `anet tasks [status]`, `anet status`, `anet logs <name>` |
+| Dispatch work, inbox, ack, report working, report completion | **MCP tools** (`anet` has no such commands) |
+| Dispatch / ack from a human's script | REST: `POST /api/task` (dispatch), `POST /api/messages/ack` (ack); `GET /api/tasks`, `GET /api/completions`. `report_status` / `report_completion` have **no** REST equivalent and are MCP-only |
 
-`anet run` 是 SSE 回声 demo（收到任务打印一行 + 自动回「收到」），不是协议工人。
+`anet run` is an SSE echo demo (it prints each incoming task and replies
+`[<alias>] 收到: <first 200 chars>` — a literal echo, not a protocol worker).
 
-## 1. 角色 A：规划者（指挥室）
+## 1. Role A: planner (control room)
 
-工具：`send_task` `get_task` `list_tasks` `cancel_task` `retry_task` `reassign_task`
-`get_all_status` `broadcast` `send_message`（池化路径另见第 6 节）。
+Tools: `send_task` `get_task` `list_tasks` `cancel_task` `retry_task` `reassign_task`
+`get_all_status` `broadcast` `send_message` (the pool path is in §6).
 
-1. **确认连接与令牌**：MCP 已连接（`tools/list` 见 commhub 工具）；必要时 `anet whoami`。
-2. **拆任务**：每个任务必须自包含（背景 + 要做什么 + 完成判据），并写明「**在你的工作目录
-   完成**」、一律相对路径（禁忌见第 4 节）。`alias` 由操作者指定，**不要假设默认值**。
-3. **派发**：
-   - 逐条 `send_task(alias=<worker-alias>, task=<任务正文>, context=<背景/参考资料>,
-     priority=<high|normal|low>, ttl_seconds=<默认 3600，长任务建议 86400>)`。
-   - 只有会互相影响的改动才用 `parent_task_id` 串成链。
-   - **派完即停**：不要在同一轮里同时派下一批、不要轮询等待——收件方是异步 AI，等它
-     自己的完成信号（`report_completion` / `get_task` 的终态）。
-4. **验收**：
-   - `get_task(task_id)` / `list_tasks(alias=<worker-alias>)` 核对状态与结果。
-   - `get_all_status` 看全局 busy/idle。
-   - 看 `get_completions(alias=<worker-alias>)` 的实际产出与自评分数（10 分制）。
-   - 验收只读，不改对方目录、不改对方状态；本轮任务是否留待你处置由操作者定。
-5. **不确定就问**：任务范围含糊、涉及改接口/删数据/动生产时，先回问操作者，不要替其决定。
+1. **Confirm connection and token**: MCP is connected (`tools/list` shows the commhub tools); run
+   `anet whoami` when in doubt.
+2. **Split the work**: every task must be self-contained (background + what to do + completion
+   criteria) and must state "**do this in your own working directory**", with relative paths only
+   (forbidden forms in §4). The operator names the `alias` — **never assume a default**.
+3. **Dispatch**:
+   - One call per task: `send_task(alias=<worker-alias>, task=<body>, context=<background/references>,
+     priority=<high|normal|low>, ttl_seconds=<default 3600, 86400 for long jobs>)`.
+   - Use `parent_task_id` to chain only changes that affect each other.
+   - **Stop after dispatching**: don't also dispatch the next batch in the same turn and don't poll —
+     the recipient is an asynchronous AI; wait for its own completion signal (`report_completion` /
+     a terminal `get_task`).
+4. **Verify**:
+   - `get_task(task_id)` / `list_tasks(alias=<worker-alias>)` to check status and result.
+   - `get_all_status` for global busy/idle.
+   - `get_completions(alias=<worker-alias>)` for the actual output and the self-score (0-10).
+   - Verification is read-only: don't touch the other side's directories or state; whether tasks
+     from this round are left for you to dispose of is the operator's call.
+5. **Ask when unsure**: vague scope, or anything touching interfaces / deleting data / production —
+   ask the operator first; don't decide for them.
 
-**任务正文铁律**（写错了工人一定做歪）：
+**Hard rules for the task body** (get these wrong and the worker will build the wrong thing):
 
-- **自包含**：正文里写清目标、路径（相对你的工作目录）、验收标准；不要引用你上一轮的
-  上下文（对方看不到）。
-- **一条任务一件事**：不要在一段正文里塞多个交付物，否则状态机与回报都会糊。
-- **TTL**：轮次内即验的用默认 3600s；跨小时/夜里跑的显式给 86400s。
-- **首行是一行摘要**（dashboard 节点卡片上显示的就是它）：正文**第 1 行**写一行式摘要，
-  ≤80 字，并保证**前 200 字符内自成完整一句**；首行之后**空一行**再写背景/步骤/验收的
-  markdown。原因：`sessions.task` 只存正文**前 200 字符**，而且是**盲切**——不看句子、
-  不看换行边界；dashboard 节点卡片、`get_all_status`、`/api/status` 读的都是这一列。
-  完整正文（≤10000 字符）在 `get_inbox` / `get_task` 里完整可见，所以别把长段落、代码块、
-  大段粘贴放在最前面。工人侧不受影响：`report_status(status="working", task=…)` 仍必须传
-  **完整原文**（精确等值匹配才进 `running`），首行摘要只是派单方的写法。
-- **不写绝对路径**（见第 4 节）。
+- **Self-contained**: state the goal, the paths (relative to your working directory) and the
+  acceptance criteria inside the body; never reference your own previous turn's context (the other
+  side cannot see it).
+- **One task, one deliverable**: don't stuff several deliverables into one body — both the state
+  machine and the reporting turn to mush.
+- **TTL**: default 3600s for anything verified within the round; give 86400s explicitly for work
+  that runs across hours or overnight.
+- **First line is a one-line summary** (this is what the dashboard node card shows): put a one-line
+  summary on **line 1**, ≤80 characters, and make sure **the first 200 characters stand as a complete
+  sentence**; leave a blank line after it, then write the background / steps / acceptance markdown.
+  Why: `sessions.task` keeps only the **first 200 characters** of the body, cut **blindly** — no
+  sentence and no newline awareness; the dashboard node card, `get_all_status` and `/api/status` all
+  read that column. The full body (≤10000 characters) is intact in `get_inbox` / `get_task`, so never
+  put a long paragraph, a code block or a big paste at the front. The worker side is unaffected:
+  `report_status(status="working", task=…)` must still pass **the complete original text** (only an
+  exact match moves the task to `running`); the first-line summary is a dispatcher-side convention.
+- **No absolute paths** (§4).
 
-## 2. 角色 B：工人（执行者）
+## 2. Role B: worker (executor)
 
-工具：`get_inbox` `ack_inbox` `report_status` `report_completion`。
+Tools: `get_inbox` `ack_inbox` `report_status` `report_completion`.
 
-1. **建档**：Hub 的 sessions 里没有你的 alias 时，规划者派发会得 `alias_not_found`。先
-   `report_status(alias=<自己>, status="idle", resume_id=<会话ID>)` 建立档案（工人节点通常由
-   `anet node create` + 运行时自动完成）。
-2. **收**：`get_inbox(alias=<自己>)` 取待办；任务消息的处理句柄是返回里的 `message_id`
-   （即 `task_id`）。
-3. **确认**：对每条任务 `ack_inbox(alias=<自己>, message_id=<task_id>)`；可带 `response`
-   写一句「已收到，开工」。`delivered → acked` 只由这一步推动。
-4. **开工**：`report_status(alias=<自己>, status="working", task=<任务原文>)` —— `task`
-   **必须逐字等于**任务正文（只按正文精确等值匹配，**没有 task_id 分支**），否则任务停在
-   acked。
-5. **汇报**：每条任务**恰好一次** `report_completion(alias=<自己>, task=<task_id 最稳；
-   传原文则须逐字一致>, result=<结果摘要：结论/改动/验证方式，任务行只存前 4000 字>,
-   artifacts=[<URL 或文件路径>])`。可顺带给 `score`（自评 0-10）。多任务合并一次 = 全不生效。
-6. **收工**：`report_status(alias=<自己>, status="idle", task=null)`（completion 也会把
-   session 置 idle）。
-7. **卡住就修**：见第 3 节与 Gotchas，**不要重发**（会被去重层拒），也不要只改状态不回报。
+1. **Register**: if the hub's sessions table has no row for your alias, the planner's dispatch
+   returns `alias_not_found`. Call `report_status(alias=<self>, status="idle", resume_id=<session id>)`
+   first to create the row (worker nodes usually get this from `anet node create` + the runtime).
+2. **Receive**: `get_inbox(alias=<self>)` for pending work; a task message's handle is the
+   `message_id` in the response (which is the `task_id`).
+3. **Acknowledge**: `ack_inbox(alias=<self>, message_id=<task_id>)` per task, optionally with
+   `response` ("received, starting"). This step alone drives `delivered → acked`.
+4. **Start**: `report_status(alias=<self>, status="working", task=<the task body>)` — `task` **must
+   be character-for-character identical** to the body (matching is exact-equality on the body only,
+   **there is no task_id branch**), otherwise the task stays in acked.
+5. **Report**: **exactly once** per task,
+   `report_completion(alias=<self>, task=<task_id is safest; the raw body must match character-for-character if used>,
+   result=<summary: conclusion / changes / how you verified — the task row keeps only the first 4000
+   characters>, artifacts=[<URL or file path>])`. You may also pass `score` (self-assessed 0-10).
+   Merging several tasks into one report = none of them take effect.
+6. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
+   session to idle).
+7. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
+   change status without reporting.
 
-**工人纪律**：
+**Worker discipline**:
 
-- 改完再报，不要先报后改；`result` 里写的验证必须是真跑过的。
-- 一条任务只发一次 completion；多条任务不要合并成一次汇报。
-- 任务要求与仓库现状冲突（比如要删的文件不存在）时，**先在 `result` 里说清冲突**，不要
-  自作主张扩大改动面。
+- Report after the work is done, not before; every verification you claim in `result` must have
+  actually been run.
+- One completion per task; never merge several tasks into one report.
+- When the task contradicts the repository (say, the file to delete does not exist), **state the
+  conflict in `result`** — don't unilaterally widen the change.
 
-## 3. 任务生命周期（状态机）
+## 3. Task lifecycle (state machine)
 
 ```
 created ──send_task──▶ delivered ──ack_inbox──▶ acked ──report_status(working)──▶ running ──report_completion──▶ replied
    │                       │                       │                                │
    │                       └───────────────────────┴────────cancel_task─────────────┴──▶ cancelled
-   └──(TTL 超时)──▶ expired        failed ◀── send_reply(status="failed") / 节点异常终止
+   └──(TTL timeout)──▶ expired        failed ◀── send_reply(status="failed") / node died abnormally
 ```
 
-| 跃迁 | 触发调用 | 要点 |
+| Transition | Call that drives it | Notes |
 |---|---|---|
-| created → delivered | `send_task` | 在线立即投递；离线返回 202 排队，上线后照投 |
-| delivered → acked | `ack_inbox(message_id=task_id)` | 只能从 delivered 起跳 |
-| delivered/acked → running | `report_status(status="working", task=<任务原文>)` | **`task` 必须逐字等于任务正文**，只按正文精确等值匹配，**没有 task_id 分支** |
-| 任意非终态 → replied | `report_completion(task=<任务原文>)` | 先按 `task_id` 找，不命中再按 `to_name=alias AND content=任务原文` 精确等值 |
-| 任意 → cancelled | `cancel_task` | 规划者/操作者用 |
-| 超时 → expired | Hub 定时 | TTL 默认 3600s，上限 86400s |
-| failed / expired / cancelled → 可重试 | `retry_task` | 固定补 +1h TTL，`task_id` 不变、inbox 里是新的 message id |
+| created → delivered | `send_task` | Delivered immediately when online; offline returns 202 (queued) and is delivered on reconnect |
+| delivered → acked | `ack_inbox(message_id=task_id)` | Only fires from delivered |
+| delivered/acked → running | `report_status(status="working", task=<body>)` | **`task` must match the body character-for-character**; exact-equality on the body only, **no task_id branch** |
+| any non-terminal → replied | `report_completion(task=<body>)` | Tries `task_id` first; on a miss, exact-equality on `to_name=alias AND content=<body>` |
+| any → cancelled | `cancel_task` | Planner/operator |
+| timeout → expired | hub timer | TTL default 3600s, max 86400s |
+| failed / expired / cancelled → retryable | `retry_task` | Always adds +1h TTL; `task_id` is unchanged, the inbox gets a new message id |
 
-**参数铁律**
+**Parameter hard rules**
 
-- `report_completion(task=…)` 的匹配：**先按 `task_id`，不命中再按 `to_name=alias AND
-  content=任务原文`** 找最近一条。
-- `report_status(task=…, status="working")` **只**按 `to_name=alias AND content=任务原文`
-  精确等值把任务翻到 running，**没有 task_id 分支**——传 `task_id` 会静默地什么都不发生，
-  任务永久停在 acked。
-- 所以：改写、概括、翻译、把多条任务拼成一次汇报，都会导致匹配失败 → 状态卡住。
-- 修正：卡在 acked 就补一条**逐字正确**的 completion（若已完工）或 working；彻底错了就
-  `cancel_task` + `retry_task` 重来。
-- 去重：同一 `(from, to, content)` 在 5 分钟内重复 `send_task` 会被拒（`duplicate_send`）。
+- `report_completion(task=…)` matching: **`task_id` first; on a miss, `to_name=alias AND
+  content=<body>`**, taking the most recent match.
+- `report_status(task=…, status="working")` flips a task to running **only** on
+  `to_name=alias AND content=<body>` exact-equality, **with no task_id branch** — passing a
+  `task_id` silently does nothing and the task stays in acked forever.
+- Therefore: rewriting, summarizing, translating, or merging several tasks into one report all break
+  the match → the state stalls.
+- To repair: if stuck in acked, add one **character-exact** completion (when the work is already
+  done) or working call; if it is thoroughly wrong, `cancel_task` + `retry_task` and start over.
+- Dedupe: the same `(from, to, content)` re-sent within 5 minutes is rejected (`duplicate_send`).
 
-## 4. 跨机 / 双目录约定
+## 4. Cross-machine / dual-directory conventions
 
-规划者与工人常在两台机器上、各自有一份工作目录，路径互不相同：
+The planner and the worker are usually on two machines with their own working copies, under different
+paths:
 
-| 角色 | 工作目录 | Git |
+| Role | Working directory | Git |
 |---|---|---|
-| 规划者（指挥室） | A 机上的任意目录，例：`~/dev/<repo>` | 同一远端分支 |
-| 工人（执行者） | B 机上的任意目录，例：`/srv/<repo>` | 同一远端分支 |
+| Planner (control room) | any directory on machine A, e.g. `~/dev/<repo>` | the same remote branch |
+| Worker (executor) | any directory on machine B, e.g. `/srv/<repo>` | the same remote branch |
 
-- **Hub 不需要知道任何项目路径**：派发只按 `alias`；工人的运行时在**它自己的工作目录**里
-  干活（节点创建时的 cwd）。路径是每台机器自己的本地事实。
-- **禁止绝对路径**：任务正文与交付说明里不得出现 `/home/...`、`C:\...`、`~/...` 这类路径；
-  也不要从 `get_all_status` 的 `project_dir` 照抄（那是上报的旧记录，换机器即失效）。要指
-  位置就写「在你的工作目录」+ 相对路径（如 `src/game.js`）。
-- **禁止跨目录假设**：不要读「对方目录」的文件判断对方进度或结果。
-- **交付只走两条路**：git push/pull，或 Hub 附件——先 `POST /api/upload` 拿到 `file_id`，
-  再放进 `report_completion` / `send_task` 的 `meta.attachments: [{type:"file", file_id}]`
-  （同时给 `file_id` 时 Hub 会剥掉 `path`，正是为跨机安全）。
-- **状态只信 Hub**：规划者用 `get_task` / `list_tasks` / `get_all_status`；工人用 `get_inbox`。
+- **The hub never needs to know any project path**: dispatch is by `alias` only; the worker's runtime
+  works in **its own working directory** (the cwd at node creation). Paths are each machine's local
+  fact.
+- **No absolute paths**: task bodies and delivery notes must not contain `/home/...`, `C:\...` or
+  `~/...`; don't copy them out of `get_all_status`'s `project_dir` either (that is a stale reported
+  value that dies the moment the machine changes). Point at locations as "in your working directory"
+  plus a relative path (e.g. `src/game.js`).
+- **No cross-directory assumptions**: never read files in "the other side's directory" to judge their
+  progress or result.
+- **Delivery has exactly two routes**: git push/pull, or a hub attachment — `POST /api/upload` to get
+  a `file_id`, then put it in `report_completion` / `send_task` as
+  `meta.attachments: [{type:"file", file_id}]` (when a `file_id` is present the hub strips `path`,
+  precisely for cross-machine safety).
+- **Trust only the hub for state**: planners use `get_task` / `list_tasks` / `get_all_status`; workers
+  use `get_inbox`.
 
-## 5. 新项目接入清单
+## 5. Wiring up a new project
 
 ```bash
 git submodule add git@github.com:pixb/agent-network-skill.git .agents/skills/agent-network-skill
@@ -256,42 +295,49 @@ git add .agents/skills/agent-network-skill .gitmodules
 git commit -m "add agent-network-skill submodule"
 ```
 
-SKILL.md 就在仓库根（不再套一层 `skills/` 容器目录 + 符号链接），所以直接挂
-`.agents/skills/<name>` 即可被 pi / opencode 等项目级扫描器发现。更新：
-`git submodule update --remote .agents/skills/agent-network-skill` 后提交。
+SKILL.md sits at the repository root (there is no extra `skills/` container directory and no
+symlink), so mounting it at `.agents/skills/<name>` is enough for project-level scanners in pi /
+opencode and friends to find it. To update: `git submodule update --remote
+.agents/skills/agent-network-skill` and commit.
 
-## 6. 需求池模式（Hub ≥ 0.9.0-preview.67）
+## 6. Requirement pool mode (hub ≥ 0.9.0-preview.67)
 
-不指定工人的「公开任务」用需求池工具（`requirements_*`），要求 hub 版本 **≥
-0.9.0-preview.67**（0.9.0-preview.64/65/66 时节点令牌还不能用这批工具）：
+"Public" tasks that name no worker use the requirement-pool tools (`requirements_*`) and need hub
+version **≥ 0.9.0-preview.67** (on 0.9.0-preview.64/65/66 node tokens could not use this tool set):
 
-- 发布：`requirements_create(name=..., description=..., column="pool")`（不写 `agent_owner`
-  即公开）。
-- 认领：工人 `requirements_update(id=..., column="doing", agent_owner={kind:"node", alias=自己})`。
-- 协作：`requirements_comment` 写进度；`requirements_checklist_toggle` 勾清单项（只写该项，
-  不覆盖别人的改动）。
-- 查询：`requirements_list(q=..., tag=..., status=...)`、`requirements_get(id 或 "#N")`。
+- Publish: `requirements_create(name=..., description=..., column="pool")` (omit `agent_owner` to make
+  it public).
+- Claim: a worker calls `requirements_update(id=..., column="doing",
+  agent_owner={kind:"node", alias=<self>})`.
+- Collaborate: `requirements_comment` for progress; `requirements_checklist_toggle` to tick one item
+  (it writes only that item and never overwrites anyone else's edit).
+- Query: `requirements_list(q=..., tag=..., status=...)`, `requirements_get(id or "#N")`.
 
-**升级提醒**：`anet hub start --version <v>` 只对**全新启动**生效（已在跑的 hub 不会因它换
-版本）——要换版本先 `anet hub stop`，或改用 pm2 的启动参数。
+**Upgrade note**: `anet hub start --version <v>` only affects a **fresh start** (an already-running
+hub will not switch versions because of it) — to change version, `anet hub stop` first, or change the
+pm2 start arguments.
 
-## Gotchas（血泪）
+## Gotchas
 
-- **规划者**：派完就停，别等、别轮询；任务含糊先回问。
-- **工人**：`get_inbox` → `ack` → `working` → `completion`，每任务一次；`result` 摘要要具体，
-  能跑就跑 lint/test 再报。
-- **状态卡住**：先看是不是把 `task` 改写/概括了（匹配按精确等值），或漏了 `ack`。
-- **`alias_not_found`**：目标 alias 在 Hub 上没有 session 记录。先确认节点是否上线，不要
-  反复重发（重发会进去重窗口）。
-- **`report_completion` 后状态没变**：`task` 参数与 Hub 存的任务正文不逐字一致，或环境变量
-  里的令牌根本不是对应节点 token（对同一 token 报同进度）。
-- **环境变量污染**：多机同会话/多 hub 并存时，`COMMHUB_URL` / `COMMHUB_TOKEN` 会串；用
-  `env -u COMMHUB_URL -u COMMHUB_TOKEN` 或显式传参净化后重跑。
-- **MCP 返回 `401 unauthorized`**：先确认令牌，不要以为 hub 坏了——`anet whoami` 或第 0.2 节
-  的 curl 可自查；缺令牌时 `/mcp` 的**任何**工具都调不了。令牌的发放 / 失效（闲置过期）/
-  撤销 / 「这枚是谁的」排查见 §0.1.1。
-- **别拿 `anet` CLI 派活**：`anet` 没有 `send_task` / `get_inbox` / `report_*` 命令，协议只
-  在 MCP 上（见 §0.3）。
-- **节点卡片上的任务文本像半句话/带乱换行**：不是 hub 坏了——`sessions.task` 只留正文前
-  200 字符且**盲切**（不看句子/换行边界）。派单时正文首行写一行摘要即可（见第 1 节
-  「首行是一行摘要」）；`get_inbox` / `get_task` 里正文始终完整。
+- **Planner**: stop after dispatching — no waiting, no polling; ask first when a task is vague.
+- **Worker**: `get_inbox` → `ack` → `working` → `completion`, once per task; make `result` concrete
+  and run lint/test before reporting when you can.
+- **Stalled state**: first check whether you rewrote/summarized `task` (matching is exact-equality) or
+  skipped `ack`.
+- **`alias_not_found`**: the target alias has no session row on the hub. Confirm the node is online
+  first, and don't re-send repeatedly (re-sends enter the dedupe window).
+- **Status unchanged after `report_completion`**: the `task` argument is not character-for-character
+  identical to the stored body, or the token in the environment is not that node's token at all
+  (reporting progress under the same token for a different node).
+- **Environment-variable contamination**: with multiple machines sharing a session or several hubs
+  around, `COMMHUB_URL` / `COMMHUB_TOKEN` bleed across; sanitize with
+  `env -u COMMHUB_URL -u COMMHUB_TOKEN` or pass values explicitly, then re-run.
+- **MCP returns `401 unauthorized`**: check the token before blaming the hub — `anet whoami` or the
+  curl from §0.2 will tell you; with no token, **no** tool on `/mcp` is callable. Issuing / expiring
+  (idle timeout) / revoking tokens, and "whose token is this", are in §0.1.1.
+- **Don't dispatch via the `anet` CLI**: `anet` has no `send_task` / `get_inbox` / `report_*`
+  commands — the protocol lives on MCP only (§0.3).
+- **A node card shows task text that reads like half a sentence / carries stray newlines**: the hub is
+  not broken — `sessions.task` keeps the first 200 characters and cuts **blindly** (no
+  sentence/newline awareness). Put a one-line summary on line 1 when dispatching (§1, "First line is
+  a one-line summary"); the body is always intact in `get_inbox` / `get_task`.

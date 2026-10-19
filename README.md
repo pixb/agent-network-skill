@@ -1,11 +1,12 @@
 # agent-network-skill
 
-CommHub MCP 双 agent 协作协议的统一技能。规划者（指挥室）与工人（执行者）共用同一份规则，
-替代散落在各工作目录里的单独说明。**与具体项目无关**：任何项目挂上即可用。
+The unified skill for the CommHub MCP two-agent collaboration protocol. Planner (control room) and
+worker (executor) share one set of rules instead of scattering separate notes across working
+directories. **Project-independent**: mount it in any project and it works.
 
-## 安装（git submodule）
+## Install (git submodule)
 
-在项目工作目录执行：
+From the project's working directory:
 
 ```bash
 git submodule add git@github.com:pixb/agent-network-skill.git .agents/skills/agent-network-skill
@@ -13,33 +14,33 @@ git add .agents/skills/agent-network-skill .gitmodules
 git commit -m "add agent-network-skill submodule"
 ```
 
-SKILL.md 就在仓库根，直接挂在 `.agents/skills/<name>` 下即可被发现——不需要额外的容器
-目录，也不需要符号链接。
+SKILL.md sits at the repository root, so mounting it at `.agents/skills/<name>` is all that
+discovery needs — no container directory and no symlink.
 
-更新：
+Update:
 
 ```bash
 git submodule update --remote .agents/skills/agent-network-skill
 git add .agents/skills/agent-network-skill && git commit -m "bump agent-network-skill"
 ```
 
-## 发现路径
+## Discovery paths
 
-| 工具 | 项目级发现 |
+| Tool | Project-level discovery |
 |---|---|
-| pi | `.agents/skills/`（从 cwd 向上到仓库根）；`/skill:agent-network-skill` 手动加载 |
-| opencode | `.opencode/skill(s)/`、祖先目录 `.agents/skills/`；系统提示里以 available_skills 呈现 |
+| pi | `.agents/skills/` (from cwd up to the repo root); `/skill:agent-network-skill` loads it manually |
+| opencode | `.opencode/skill(s)/`, an ancestor `.agents/skills/`; surfaced as available_skills in the system prompt |
 
-## 使用
+## Usage
 
-- 规划者：`/agent-network-skill 拆任务并派给 <worker-alias>`
-- 工人：`/skill:agent-network-skill` 后说「收任务」
-- 连接前提、令牌分层与 CLI/MCP 分工见 [SKILL.md](SKILL.md) 第 0 节
+- Planner: `/agent-network-skill split the work and dispatch it to <worker-alias>`
+- Worker: `/skill:agent-network-skill`, then say "take a task"
+- Prerequisites, token tiers and the CLI/MCP split are in [SKILL.md](SKILL.md) §0
 
-## 内容
+## Contents
 
-| 文件 | 作用 |
+| File | Purpose |
 |---|---|
-| [SKILL.md](SKILL.md) | 协议全文：连接与令牌、两个角色流程、状态机、参数铁律、跨机约定、需求池、Gotchas |
-| [AGENTS.md](AGENTS.md) | 目录级说明（哪些 agent 该读、触发条件） |
-| [discovery.json](discovery.json) | 技能发现元数据（触发条件、证据、路由测试） |
+| [SKILL.md](SKILL.md) | The full protocol: connection and tokens, both role flows, state machine, parameter hard rules, cross-machine conventions, requirement pool, Gotchas |
+| [AGENTS.md](AGENTS.md) | Directory-level notes (which agents should read it, trigger conditions) |
+| [discovery.json](discovery.json) | Skill discovery metadata (triggers, evidence, routing tests) |
