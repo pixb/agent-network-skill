@@ -1,15 +1,15 @@
 # Verification: agent-network-skill
 
-<!-- agent-skill-verification: {"clean": true, "commit": "8d45e1cafd222a230961746744ee7e218e047cc5", "fingerprint": "0d62b441ba8e0094500c47857cd5558319ad2969dfb005728e32b3ab5cd73bb7", "version": "0.5.0"} -->
+<!-- agent-skill-verification: {"clean": true, "commit": "43009a2617d91ed0f8af9d94728687c8b868472c", "fingerprint": "5ce4859f9174c62d0fbf3b86e48d38280527c56ee0417f0b9ead0cc7605f9a83", "version": "0.5.0"} -->
 
-Generated: 2026-10-20T07:16:28Z
+Generated: 2026-10-20T08:32:02Z
 
 ## Release evidence
 
 - Run type: representative
 - Recorded execution environments: pi
 - Cross-environment compatibility: not established by this report
-- Eval rollout: 8 passed, 0 failed, 0 errored, 0 regressed
+- Eval rollout: 25 passed, 0 failed, 0 errored, 0 regressed
 
 ## Gates
 
