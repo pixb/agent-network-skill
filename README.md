@@ -33,6 +33,9 @@ git clone git@github.com:pixb/agent-network-skill.git
 cd agent-network-skill && ./install.sh
 ```
 
+Clone it into a directory named `agent-network-skill`: the Agent Skills spec requires the skill's
+`name` to match its parent directory, and the spec validators reject a mismatch.
+
 `install.sh` detects your platform and installs to its native path (Claude Code, Copilot, Cursor,
 Codex, Gemini, Kiro, OpenCode, Goose, Cline, Roo, Kilo, Factory, Junie, Antigravity, and the
 universal `~/.agents/skills/`). Use `--platform <name>`, `--project`, `--path <dir>`, `--all`, or
