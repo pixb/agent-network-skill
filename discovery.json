@@ -1,26 +1,30 @@
 {
-  "question": "How do two agents — a planner and a worker — follow one CommHub MCP task protocol to reliably complete the dispatch, execution, reporting and verification loop?",
+  "question": "How do two agents — a planner and a worker — follow one CommHub MCP task protocol to reliably complete the dispatch, execution, reporting and verification loop, and how is a manual node (no MCP runtime) driven through the same lifecycle by hand?",
   "trigger": [
     "The user asks to dispatch a task, take a task, verify work, or debug a stalled task",
     "A new session's agent needs to connect to the commhub / agent-network MCP",
-    "Protocol failures such as alias_not_found, a task stopped in acked, or report_completion having no effect"
+    "Protocol failures such as alias_not_found, a task stopped in acked, or report_completion having no effect",
+    "A node has no agent runtime behind it (hub runtime = manual) and someone must consume its work by hand",
+    "A dispatched task sits in delivered and nobody seems to have picked it up"
   ],
   "decision": [
     "Call the MCP tools according to the role flows and state machine defined in SKILL.md",
     "When a parameter mismatch stalls the state, repair it per Gotchas (cancel/retry, or add the correct completion)",
-    "Judge cross-machine results from the hub task row only — never read the other side's directory"
+    "Judge cross-machine results from the hub task row only — never read the other side's directory",
+    "For a manual node, drive the protocol with scripts/anet_manual_node.sh and read the task row, never the session status, to decide whether work started"
   ],
   "evidence": [
     "CommHub source tree docs-site/docs/api/mcp-tools.md — tool signatures and side effects",
     "CommHub source tree server/src/tools.ts — the state machine's exact-match logic",
-    "Postmortems and verification of the cross-machine two-agent loop (exact task-body matching, ack/working/completion order)"
+    "Postmortems and verification of the cross-machine two-agent loop (exact task-body matching, ack/working/completion order)",
+    "references/manual-node.md — the manual-node lifecycle, its token rules, and the online-vs-working diagnosis"
   ],
-  "success_measure": "The planner dispatches per the hard rules and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task",
-  "outcome": "Two agents complete a verifiable task loop under one protocol",
+  "success_measure": "The planner dispatches per the hard rules and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task; a manual node's task also reaches replied, driven by the bundled script",
+  "outcome": "Two agents complete a verifiable task loop under one protocol, and a manual node is driven through the same lifecycle without an agent behind it",
   "intended_users": ["planner agent (control room)", "worker agent (executor)", "human operator"],
-  "input_types": ["task instructions", "MCP tool responses"],
-  "output_artifacts": ["hub task state transitions", "completions result records"],
-  "use_cases": ["task dispatch", "task consumption", "status verification", "protocol troubleshooting"],
+  "input_types": ["task instructions", "MCP tool responses", "manual node hub url and node alias"],
+  "output_artifacts": ["hub task state transitions", "completions result records", "manual node heartbeat and status files"],
+  "use_cases": ["task dispatch", "task consumption", "status verification", "protocol troubleshooting", "manual node operation"],
   "examples": [
     {
       "invocation": "/agent-network-skill split this round's work and dispatch it to <worker-alias>",
@@ -29,12 +33,17 @@
     {
       "invocation": "/agent-network-skill take a task and report per protocol (worker side)",
       "description": "The worker consumes in order: register, ack, working with the verbatim body, exactly one completion per task"
+    },
+    {
+      "invocation": "/agent-network-skill the manual node got a task but nothing started, check it",
+      "description": "The operator runs scripts/anet_manual_node.sh check and reads the per-task verdict (delivered = never acked, acked = body not reported, running = in progress)"
     }
   ],
   "permissions_systems": [
     "Call CommHub MCP tools on <hub>/mcp",
     "Read the hub token from an environment variable or local config",
-    "Read and write the git repository of the project that mounted this skill"
+    "Read and write the git repository of the project that mounted this skill",
+    "Run scripts/anet_manual_node.sh on the machine that owns the manual node (it writes a node config and heartbeat files there)"
   ],
   "typical_completion_time": "5-60 minutes",
   "compatibility": {
@@ -50,12 +59,14 @@
     "required_capabilities": [
       "HTTP POST to <hub>/mcp (local default http://127.0.0.1:9200/mcp)",
       "Read the hub token from an environment variable or local config",
-      "Call the MCP tools as specified in SKILL.md"
+      "Call the MCP tools as specified in SKILL.md",
+      "bash plus node (or bun) on PATH to run scripts/anet_manual_node.sh"
     ],
     "readiness_checks": [
       "The MCP tool set is visible (connected)",
       "The token exists and is the right kind (planner: utok/atok; worker: ntok)",
-      "The worker alias already has a session row on the hub"
+      "The worker alias already has a session row on the hub",
+      "For a manual node: the node config exists and holds a node token bound to that alias"
     ]
   },
   "risk": {
@@ -63,10 +74,11 @@
     "permissions": [
       "Dispatch tasks to the hub (send_task wakes the recipient AI)",
       "Modify hub task and session state",
-      "Read and write the git repository of the project that mounted this skill"
+      "Read and write the git repository of the project that mounted this skill",
+      "Mint and store a node token for a manual node, and write heartbeat state files next to its config"
     ],
     "mutation_boundary": "approval-required",
-    "approval_required": ["Dispatching and verifying are triggered by the operator's instruction; the planner stops once dispatches are sent"]
+    "approval_required": ["Dispatching and verifying are triggered by the operator's instruction; the planner stops once dispatches are sent", "Running the manual-node script against a hub is an explicit operator action"]
   },
   "software_mutation": {
     "applies": false
@@ -83,9 +95,12 @@
       "take a task and report per protocol",
       "how do I fix a task stuck in acked",
       "verify <worker-alias>'s tasks",
+      "the manual node got a task but nothing started, check it",
       "派任务给 <worker-alias>",
       "收任务并按协议汇报",
-      "任务卡在 acked 怎么修"
+      "任务卡在 acked 怎么修",
+      "手动节点收到任务了但没人开工，怎么看",
+      "任务没被 ack"
     ],
     "should_not_trigger": [
       "edit opencode's own configuration",

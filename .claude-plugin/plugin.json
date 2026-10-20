@@ -1,0 +1,8 @@
+{
+  "name": "agent-network-skill",
+  "version": "0.5.0",
+  "description": "CommHub MCP task protocol for planners and workers, plus the manual-node (no MCP runtime) operating manual.",
+  "author": {
+    "name": "pixb"
+  }
+}

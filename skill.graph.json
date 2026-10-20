@@ -1,0 +1,265 @@
+{
+  "artifacts": [
+    {
+      "id": "claude_plugin_marketplace_json",
+      "path": ".claude-plugin/marketplace.json",
+      "sha256": "7eeeb721fcb0bfa51f635c39c7f91da5df5442958a53adc6860223e3c546a9f9",
+      "type": "package_file"
+    },
+    {
+      "id": "claude_plugin_plugin_json",
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "689485d8b69d684918579f580ebb06acd6f7e97306f73ca3f89ec23e965d3ad6",
+      "type": "package_file"
+    },
+    {
+      "id": "agents_document",
+      "path": "AGENTS.md",
+      "sha256": "0c3937203af509283903c89fd28cb0bc0e460493943be5160e4fdefcb4e585c7",
+      "type": "companion_instruction"
+    },
+    {
+      "id": "evolution_md",
+      "path": "EVOLUTION.md",
+      "sha256": "6ac4341b7ca11a87a6cf480f895899c0ad90d76ec5b9e387b666e166b0c600cb",
+      "type": "package_file"
+    },
+    {
+      "id": "license",
+      "path": "LICENSE",
+      "sha256": "ffc93292f711c06f8fa9c0696b2bf8e46f071d092939ee03b85084306febb4d2",
+      "type": "package_file"
+    },
+    {
+      "id": "readme_md",
+      "path": "README.md",
+      "sha256": "c5bb3fe840bcc7a9f7377e674c48a125b4eef3d758c9be165c39cdc45d3a40e5",
+      "type": "package_file"
+    },
+    {
+      "id": "skill_document",
+      "path": "SKILL.md",
+      "sha256": "5ca8e78f0184174ff1d3cb6e95761880fb9278b508f63d90b362d178a0956fbb",
+      "type": "instruction"
+    },
+    {
+      "id": "discovery_json",
+      "path": "discovery.json",
+      "sha256": "ee1849aa5efc00f8460ac0075285efff3cf0e1af83bb45e65f585a768db81cf8",
+      "type": "package_file"
+    },
+    {
+      "id": "evals_agent_network_skill_eval_md",
+      "path": "evals/agent-network-skill.eval.md",
+      "sha256": "a419e70afc82b42f508e757d3b9e6db5a7c5bee6c07acbaa5a1ff61ca5b9daec",
+      "type": "eval_spec"
+    },
+    {
+      "id": "case_1_expected",
+      "path": "evals/golden/case-1/expected.json",
+      "sha256": "d27cd061e505a3f5a45282fc512bd0cd5ae38e4b2b4268afaaab3bfd8deea2b6",
+      "type": "expected_output"
+    },
+    {
+      "id": "case_1_input",
+      "path": "evals/golden/case-1/input.json",
+      "sha256": "d17a2156315bcd273e7f5360a2ec891fa8d8c3456edd3bf7defdc90a1a154f78",
+      "type": "golden_input"
+    },
+    {
+      "id": "case_2_expected",
+      "path": "evals/golden/case-2/expected.json",
+      "sha256": "1efa5bddcc1fb895d65331a55eb082c1cca3e059f6a196458a462cd8927a5064",
+      "type": "expected_output"
+    },
+    {
+      "id": "case_2_input",
+      "path": "evals/golden/case-2/input.json",
+      "sha256": "9d2613d90b2751d0fd26eba1c70b97edc88a9110dd8cbf0a81617670d6939266",
+      "type": "golden_input"
+    },
+    {
+      "id": "case_3_input",
+      "path": "evals/golden/case-3/input.json",
+      "sha256": "32e97bab547cbde13850e084a3d67058e03a3b1372d613c9ba8a8eb910e31f5d",
+      "type": "golden_input"
+    },
+    {
+      "id": "evals_pipeline_report_json",
+      "path": "evals/pipeline-report.json",
+      "sha256": "bca66563c29c81d51d8c5d6b6487c6f098e1fa7110784a0becd0d9a857bf3266",
+      "type": "package_file"
+    },
+    {
+      "id": "install_ps1",
+      "path": "install.ps1",
+      "sha256": "b9df151a5b0f10c75d37c8a9fb1cb77c1020247d9d287843ab487625620108e9",
+      "type": "package_file"
+    },
+    {
+      "id": "install_sh",
+      "path": "install.sh",
+      "sha256": "3ff322c16784cfd248849ec7d5f2cb054149c520e8702dea3e057751342fc712",
+      "type": "package_file"
+    },
+    {
+      "id": "references_manual_node_md",
+      "path": "references/manual-node.md",
+      "sha256": "bf57c1c9589b4f40707e42c7868657f22d4e9562db24db74bb4007e7c25120e7",
+      "type": "reference"
+    },
+    {
+      "id": "scripts_anet_manual_node_sh",
+      "path": "scripts/anet_manual_node.sh",
+      "sha256": "2073e9cf7fcf658630e07db33a58bd6335af414ee41ac7e611fc82f0188d7c38",
+      "type": "script"
+    },
+    {
+      "id": "scripts_evolve_py",
+      "path": "scripts/evolve.py",
+      "sha256": "5f35ea818449d0dd51f7d6d0359897659425cc4f2a8dcb66fe6a83540e3a2cb5",
+      "type": "script"
+    },
+    {
+      "id": "scripts_run_evals_py",
+      "path": "scripts/run_evals.py",
+      "sha256": "7a2776a33d1c90e76bb1571413ce4996fc1938775509c4215aaa1fe7409c9202",
+      "type": "script"
+    },
+    {
+      "id": "pipeline",
+      "path": "scripts/run_pipeline.py",
+      "sha256": "2408d70a204de67a81a7ded88ebc96e403041e570f31d0cb554bf00a6d14a4be",
+      "type": "script"
+    },
+    {
+      "id": "scripts_success_ledger_py",
+      "path": "scripts/success_ledger.py",
+      "sha256": "f0eee7d0deac4dca979c325ff3920231cdc6ad0a1263b5d801dd93c0e47b036f",
+      "type": "script"
+    },
+    {
+      "id": "scripts_wiki_maintenance_py",
+      "path": "scripts/wiki_maintenance.py",
+      "sha256": "e8b65667530f7b78aece53b3fd2c49e05b53767e2d6ef1f98ff37db58b04ce14",
+      "type": "script"
+    },
+    {
+      "id": "tests_manual_node_e2e_sh",
+      "path": "tests/manual_node_e2e.sh",
+      "sha256": "a27c3c568391166f2d2f6e8c276dcd5a613b6811fac20a4aef81d9bcbc6466f0",
+      "type": "package_file"
+    },
+    {
+      "id": "tests_manual_node_scenario_sh",
+      "path": "tests/manual_node_scenario.sh",
+      "sha256": "80ae611adfc851b78d64d960f841fea43778cdff57913c62356389a916a730df",
+      "type": "package_file"
+    },
+    {
+      "id": "wiki_readme_md",
+      "path": "wiki/README.md",
+      "sha256": "750a1db3ff19ec39b7caf0c4f63a32c83dc854349a201f8da12fecfc61ec207c",
+      "type": "package_file"
+    },
+    {
+      "id": "wiki_index_md",
+      "path": "wiki/index.md",
+      "sha256": "ff8db0bddf99128815a6d4ecc26c12f4d95b6c8cb05ac02696bdd9ce7e0dd753",
+      "type": "package_file"
+    },
+    {
+      "id": "wiki_logs_md",
+      "path": "wiki/logs.md",
+      "sha256": "e95f791330b8702b1cd99d271e9f577738ebb7354863422de2338d5091fe7330",
+      "type": "package_file"
+    },
+    {
+      "id": "wiki_skill_impact_md",
+      "path": "wiki/skill-impact.md",
+      "sha256": "a79d68179ab12324404601d5a4360f8d6d77b5e22eb87f218b32d00a41334756",
+      "type": "package_file"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "every_expected_is_reachable",
+      "severity": "error"
+    },
+    {
+      "id": "deterministic_multistep_has_orchestrator",
+      "severity": "error"
+    },
+    {
+      "id": "semantic_recon_contracts_ready",
+      "severity": "error"
+    }
+  ],
+  "edges": [
+    {
+      "from": "case_1_input",
+      "relation": "consumed_by",
+      "to": "pipeline"
+    },
+    {
+      "from": "case_2_input",
+      "relation": "consumed_by",
+      "to": "pipeline"
+    },
+    {
+      "from": "case_3_input",
+      "relation": "consumed_by",
+      "to": "pipeline"
+    },
+    {
+      "from": "pipeline",
+      "relation": "compared_against",
+      "to": "case_1_expected"
+    },
+    {
+      "from": "pipeline",
+      "relation": "compared_against",
+      "to": "case_2_expected"
+    }
+  ],
+  "gates": [
+    {
+      "id": "spec",
+      "inputs": [
+        "skill_document",
+        "package_index"
+      ]
+    },
+    {
+      "id": "security",
+      "inputs": [
+        "package"
+      ]
+    },
+    {
+      "id": "pipeline",
+      "inputs": [
+        "scripts",
+        "dependency_manifests"
+      ]
+    },
+    {
+      "id": "eval_schema",
+      "inputs": [
+        "eval_specs",
+        "golden_cases",
+        "eval_runner"
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "semantic_recon": {
+    "reasons": [],
+    "sources": [],
+    "status": "NOT_REQUIRED"
+  },
+  "skill": "agent-network-skill",
+  "workflow": {
+    "kind": "independent"
+  }
+}

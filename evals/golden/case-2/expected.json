@@ -1,0 +1,19 @@
+{
+  "scenario": "stuck-delivered",
+  "ok": true,
+  "final_status": "delivered",
+  "transitions": [
+    "dispatched",
+    "status:delivered"
+  ],
+  "verdicts": [
+    "task <id> is still delivered after <n>s \u2014 nobody acked it: the node is reachable but the work never started"
+  ],
+  "checks": {
+    "stuck_task_stays_delivered": true,
+    "stuck_task_is_diagnosed": true,
+    "task_reaches_replied": false,
+    "terminal_task_refuses_second_reply": false
+  },
+  "error": null
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-network-skill",
+  "owner": {
+    "name": "pixb"
+  },
+  "plugins": [
+    {
+      "name": "agent-network-skill",
+      "source": "./",
+      "description": "CommHub MCP task protocol for planners and workers, plus the manual-node (no MCP runtime) operating manual."
+    }
+  ]
+}

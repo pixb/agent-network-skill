@@ -1,0 +1,19 @@
+{
+  "scenario": "full-lifecycle",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:acked",
+    "status:running",
+    "status:replied"
+  ],
+  "verdicts": [],
+  "checks": {
+    "task_reaches_replied": true,
+    "result_stored_on_task_row": true,
+    "transitions_observed": true
+  },
+  "error": null
+}

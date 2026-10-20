@@ -1,28 +1,31 @@
 ---
 name: agent-network-skill
 description: >-
-  CommHub MCP two-way task protocol: planners dispatch and verify work with send_task / get_task /
-  list_tasks; workers take it and report back with get_inbox / ack_inbox / report_status /
-  report_completion. Covers token tiers (utok/atok/ntok) and how to obtain each from scratch, the
-  task lifecycle state machine, the exact-match parameter rules, cross-machine path-independent
-  conventions and the manual three-step flow; requirement-pool mode (tasks with no named worker,
-  requirements_*, claiming). Triggers: dispatch a task, take a task, verify work, check inbox, task
-  stuck in acked, alias_not_found, report_completion has no effect, commhub, agent-network, MCP
-  worker, control room, requirement pool, publish a task without naming a worker, claim a task,
-  dashboard node card shows truncated task text. Chinese triggers (keep matching these): 派任务、
-  收任务、验收、查 inbox、任务卡在 acked、alias_not_found、report_completion 不生效、commhub、
-  agent-network、MCP 工人、指挥室、需求池、发布不指定工人的任务、认领任务、dashboard 节点卡片任务文本被截断。
+  CommHub MCP task protocol for planners (send_task / get_task / list_tasks) and workers (get_inbox /
+  ack_inbox / report_status / report_completion): token tiers (utok/atok/ntok), the task lifecycle
+  state machine, the exact-match parameter rules, cross-machine path-independent conventions,
+  requirement-pool mode (tasks with no named worker, requirements_*, claiming), and manual nodes
+  (no MCP runtime) driven by scripts/anet_manual_node.sh. Triggers: dispatch a task, take a task,
+  verify work, check inbox, task stuck in acked or delivered, alias_not_found, report_completion has
+  no effect, commhub, agent-network, MCP worker, control room, requirement pool, manual node
+  heartbeat, dashboard node card shows truncated task text. Chinese triggers (keep matching these):
+  派任务、收任务、验收、查 inbox、任务卡在 acked 或 delivered、alias_not_found、report_completion 不生效、
+  commhub、agent-network、MCP 工人、指挥室、需求池、手动节点、手动节点心跳、任务没被 ack、
+  dashboard 节点卡片任务文本被截断。
 license: MIT
 activation: /agent-network-skill
+compatibility: >-
+  Needs a CommHub hub reachable over HTTP. The bundled manual-node script needs bash plus node (or
+  bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.4.0
+  version: 0.5.0
   created: 2026-10-07
-  last_reviewed: 2026-10-19
+  last_reviewed: 2026-10-20
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.4.0
+  version: 0.5.0
   created: 2026-10-07
 ---
 
@@ -317,6 +320,39 @@ version **≥ 0.9.0-preview.67** (on 0.9.0-preview.64/65/66 node tokens could no
 hub will not switch versions because of it) — to change version, `anet hub stop` first, or change the
 pm2 start arguments.
 
+## 7. Manual nodes (no MCP runtime behind them)
+
+A **manual node** is a hub node with no agent runtime: no agent-node process, no MCP tool surface,
+so no model ever calls `get_inbox` or `report_status` for it. It still receives dispatched tasks and
+still has to move through the same lifecycle — a human, or a script acting for one, performs each
+transition explicitly. A node whose hub `runtime` is `manual` is one of these; a node with a real
+runtime is driven by its runtime and by the MCP tools in §2, **not** by the script below.
+
+Run `scripts/anet_manual_node.sh` (a single self-contained file; needs bash plus node or bun) on the
+machine that owns the node. It is the whole protocol, made explicit:
+
+```bash
+./anet_manual_node.sh init --node <alias> --project-root <dir>   # mint node token + register
+./anet_manual_node.sh start --node <alias> --project-root <dir>  # heartbeat: keeps it visible
+./anet_manual_node.sh inbox --node <alias> --project-root <dir>  # what arrived
+./anet_manual_node.sh working <task_id> 10 --node <alias> --project-root <dir>
+./anet_manual_node.sh reply <task_id> "done: ..." --node <alias> --project-root <dir>
+```
+
+Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
+why the task body is fetched from the hub instead of retyped.
+
+**The one thing every agent must know**: a heartbeat and a task are independent facts. A healthy
+heartbeat with `sessions.status = idle` looks exactly like a node that is doing nothing while its
+task sits untouched. "Online" is not "working" — the task row is the only evidence that work
+started, and it only moves when somebody acks and reports the body verbatim. When a task looks
+stuck, run `check` and read the verdict per task, not the session status:
+
+- **still `delivered`** — nobody acked it; the work never began (the hub's patrol logs
+  `task.warning.delivered_stale_30s` / `_60s` for the same condition)
+- **`acked` but not `running`** — the body was never reported byte-for-byte
+- **`running`** — genuinely in progress
+
 ## Gotchas
 
 - **Planner**: stop after dispatching — no waiting, no polling; ask first when a task is vague.
@@ -324,6 +360,12 @@ pm2 start arguments.
   and run lint/test before reporting when you can.
 - **Stalled state**: first check whether you rewrote/summarized `task` (matching is exact-equality) or
   skipped `ack`.
+- **A task stuck in `delivered` is usually "nobody acked it", not "the node is offline"** — the hub's
+  `delivered_stale_*` patrol warnings say exactly that, and a manual node (§7) can be heartbeating
+  happily while its task sits untouched. Read the task row, not the session row.
+- **`report_status` is node-only**: a user token gets `network_token_required`. A manual node needs
+  its own `ntok_`, which is why `anet node create` is not the way to make one — its runtime
+  whitelist has seven entries and `manual` is not among them.
 - **`alias_not_found`**: the target alias has no session row on the hub. Confirm the node is online
   first, and don't re-send repeatedly (re-sends enter the dedupe window).
 - **Status unchanged after `report_completion`**: the `task` argument is not character-for-character
