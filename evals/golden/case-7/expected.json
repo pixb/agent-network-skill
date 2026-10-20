@@ -1,0 +1,25 @@
+{
+  "scenario": "skipped-working",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:replied"
+  ],
+  "verdicts": [
+    "reply warned: warning: task <id> was closed while still 'delivered' \u2014 it jumped delivered -> replied."
+  ],
+  "checks": {
+    "skipped_working_is_warned": true,
+    "skipped_working_task_still_replies": true,
+    "skipped_working_never_reached_running": true,
+    "task_reaches_replied": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

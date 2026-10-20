@@ -342,6 +342,52 @@ machine that owns the node. It is the whole protocol, made explicit:
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
 why the task body is fetched from the hub instead of retyped.
 
+### 7.1 The one step you must not skip: `working`
+
+**An automatic node's runtime sends `report_status("working")` by itself** — the agent-node
+process does it when a turn starts, and keeps re-sending it on the heartbeat
+(`agent-node/src/cli.ts`). **A manual node has no runtime, so nothing sends it for you.** The
+`working` command is your only "I have started this" signal, and the only thing that writes
+`tasks.started_at`.
+
+Skipping it does **not** fail. The hub lets a task go `delivered → replied` directly
+(`report_completion` matches `status IN ('delivered','acked','running')`), so the reply still
+lands and nobody is told anything went wrong. The cost is invisible to you and expensive to
+the planner:
+
+| what the planner sees | with `working` | without it |
+|---|---|---|
+| task row | `running`, `started_at` set | `delivered` the whole time |
+| session row | `working` + the task text | `idle` + empty text |
+| hub patrol | quiet | `task.warning.delivered_stale_30s` / `_60s` all run long |
+| queue depth | honest | the node looks free to dispatch to |
+
+So a manual node that reads the inbox and then works without `working` spends the whole job
+**invisible** — the planner sees an idle node and a task nobody started.
+
+> **Rule: no `working`, no start.** Run `working <task_id> 0` *before* you begin the work, not
+> after. `working` acks the task if it is still `delivered`, fetches the body from the hub
+> (never retype it), reports it, and then verifies the hub really says `running` — if it does
+> not, it fails loudly instead of leaving you busy-but-invisible.
+
+`reply` warns when a task is closed while it was still `delivered` or `acked`, because that
+means `working` was skipped. The warning does not block the reply — the work really is done —
+but it is the only signal you get that the run was invisible.
+
+### 7.2 What the hub should look like once you start
+
+Three independent facts have to line up; a heartbeat moves **none** of them.
+
+| hub fact | while you work | who writes it |
+|---|---|---|
+| `tasks.status` | `running`, with `started_at` set | `working` |
+| `inbox.acked` | `1` | `working` (it acks first) |
+| `sessions.status` / `sessions.task` | `working` + the body | `working` / the heartbeat |
+
+`check` prints the slot (the one task this node holds) separately from the queue (the open
+task rows), because they are different things — read the **verdict per task**, not the session
+status.
+
 **Two facts that decide how a manual node behaves** (both are hub storage
 semantics, not conventions):
 

@@ -98,6 +98,40 @@ up.
 A heartbeat alone moves **none** of them. `report_status(idle)` every 30 seconds keeps the
 node visible and dispatchable, and nothing more.
 
+### The step that cannot be skipped: `working`
+
+**An automatic node's runtime reports `working` on its own** — agent-node sends
+`report_status("working")` when a turn starts and keeps re-sending it on the heartbeat
+(`agent-node/src/cli.ts`). **A manual node has no runtime, so nothing sends it for you.**
+
+This is the whole difference between the two node types, and it is easy to miss because
+**the hub will not tell you that you skipped it**: `report_completion` matches
+`status IN ('delivered', 'acked', 'running')`, so a task can go `delivered → replied` in one
+step. The reply lands, the result is stored, nothing errors — and the run was invisible.
+
+| what the planner sees | with `working` | without it |
+|---|---|---|
+| task row | `running`, `started_at` set | `delivered` for the whole run |
+| session row | `working` + the task text | `idle` + empty text |
+| hub patrol | quiet | `task.warning.delivered_stale_30s` / `_60s` the whole time |
+| queue depth | honest | the node looks free to dispatch to |
+
+The `working` command is also the only thing that writes `tasks.started_at`, and the only
+thing that makes the session row show *what* you are working on. Run it **before** you begin,
+not after:
+
+```bash
+./anet_manual_node.sh working <task_id> 0 --node my-manual-node --project-root /path/to/project
+```
+
+`working` acks the task if it is still `delivered`, fetches the body from the hub, reports
+it, and then re-reads the task to confirm the hub really says `running` — if it does not, it
+fails loudly instead of leaving you busy-but-invisible.
+
+`reply` warns when it finds the task still `delivered` or `acked`, because that means
+`working` was skipped. It does not block: the work really is finished, and refusing to close
+a finished task would strand it. The warning is the only signal that the run was invisible.
+
 ### The full sequence
 
 ```bash
@@ -111,6 +145,7 @@ node visible and dispatchable, and nothing more.
 ./anet_manual_node.sh inbox --node my-manual-node --project-root /path/to/project
 
 # 4. take it: acks if needed, then reports working with the body fetched from the hub
+#    (do this BEFORE the work — it is the only "I started" signal you get)
 ./anet_manual_node.sh working <task_id> 10 --node my-manual-node --project-root /path/to/project
 
 # 5. finish it

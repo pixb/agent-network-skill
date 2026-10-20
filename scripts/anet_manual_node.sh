@@ -425,6 +425,20 @@ async function listInbox() {
     if (m.context) console.log("context :", m.context);
     if (m.meta && Object.keys(m.meta).length) console.log("meta    :", JSON.stringify(m.meta));
   }
+  // Say what to do NEXT, with the command already filled in. A manual node
+  // has no runtime to report "working" for it (see references/manual-node.md:
+  // an automatic node's runtime sends report_status("working") by itself), so
+  // this is the only place the operator learns that reading the inbox is NOT
+  // the same as starting the work.
+  console.log("-".repeat(60));
+  console.log("");
+  console.log("Taking a task is a separate step — reading the inbox does not start the work.");
+  console.log("Without it the task stays 'delivered' and the planner sees an idle node.");
+  for (const m of messages) {
+    const id = m.task_id || m.id;
+    if (m.type !== "task") continue;
+    console.log(`  ${SCRIPT_NAME} working ${id} 0 --node ${alias}`);
+  }
   // Remember what this node has seen, so a task that later disappears (taken
   // away, expired, retried) can be named instead of vanishing silently.
   const seen = readSeen();
@@ -615,6 +629,27 @@ async function replyTask(id, text, status, via) {
   await reportOnce({ status: "idle", progress: 0, task: null, task_id: null });
   const after = await mcp("get_task", { task_id: id });
   console.log(`replied to ${id} (hub task status: ${after.task ? after.task.status : "?"})`);
+  // A task that was closed while it was still 'delivered' never went through
+  // ack/working: the hub lets report_completion jump delivered -> replied
+  // (server/src/tools.ts: `status IN ('delivered','acked','running')`). The
+  // reply still lands, but for the whole run the planner saw an idle node and
+  // a task nobody had started — the hub logged delivered_stale_* the whole
+  // time. Warn, but do not block: the work really is finished, and refusing
+  // to close a finished task would strand it.
+  if (t.task.status === "delivered") {
+    console.log("");
+    console.log(`warning: task ${id} was closed while still 'delivered' — it jumped delivered -> replied.`);
+    console.log("         nobody ever acked it, so the planner saw an idle node for the whole run.");
+    console.log("         next time: " + SCRIPT_NAME + " working " + id + " 0   (before starting the work)");
+  } else if (t.task.status === "acked") {
+    // Acked but never reported 'working': the body was never sent back
+    // verbatim, so the task never reached 'running'. The planner saw the
+    // task as taken but never as in progress.
+    console.log("");
+    console.log(`warning: task ${id} was closed while still 'acked' — it never reached 'running'.`);
+    console.log("         'working' was never reported, so the planner never saw the work in progress.");
+    console.log("         next time: " + SCRIPT_NAME + " working " + id + " 0   (before starting the work)");
+  }
   out({ ok: true, task_id: id, status: after.task ? after.task.status : null });
 }
 

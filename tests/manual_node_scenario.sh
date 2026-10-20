@@ -9,6 +9,9 @@
 # where <name> is one of:
 #   full-lifecycle   register, dispatch, ack, working, reply  -> task ends replied
 #   stuck-delivered  register, dispatch, nothing else         -> task ends delivered
+#   skipped-working  register, dispatch, reply (no working)   -> task ends replied,
+#                                                             and reply warns that
+#                                                             the run was invisible
 #   terminal-refused register, dispatch, ack, working, reply,
 #                    then a second reply                     -> the second reply is refused
 #
@@ -284,6 +287,63 @@ if [ "$SCENARIO" = "two-tasks" ]; then
   check "terminal_task_refuses_second_reply" false
   check "hijacked_task_is_refused" false
   check "vanished_task_is_named" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── skipped-working: the hub lets a task skip straight to replied ─────────
+# The failure this scenario pins down: a manual node reads the inbox, does the
+# work, and replies — never calling `working`. The hub ACCEPTS that (report_
+# completion matches status IN ('delivered','acked','running')), so the reply
+# lands and the run is silently invisible: the task sat in 'delivered' the
+# whole time and the planner saw an idle node. `reply` must warn.
+if [ "$SCENARIO" = "skipped-working" ]; then
+  run inbox >"$WORK/inbox.log" 2>&1 || fail "inbox failed"
+  # The inbox must point at the next step, or an operator has no way to learn
+  # that reading the inbox is not the same as starting the work. The command
+  # is printed ready to run (it carries --node), so it can be copied as-is.
+  grep -q "working $TASK_ID 0 --node scenario-node" "$WORK/inbox.log" \
+    || fail "inbox did not print the next step (working $TASK_ID): $(tail -5 "$WORK/inbox.log")"
+
+  # No ack, no working — go straight to reply, exactly like the production
+  # incident this scenario came from.
+  run reply "$TASK_ID" "scenario done: the work was finished" >"$WORK/reply.log" 2>&1 \
+    || fail "reply failed: $(tail -1 "$WORK/reply.log")"
+  record_status "$TASK_ID"
+
+  grep -q "warning: task $TASK_ID was closed while still 'delivered'" "$WORK/reply.log" \
+    || fail "reply did not warn that working was skipped: $(tail -5 "$WORK/reply.log")"
+  record_verdict "reply warned: $(grep '^warning: task' "$WORK/reply.log" | head -1 | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
+
+  # The task still reached a terminal state — the reply is not blocked, the
+  # work was really done.
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "replied" ] \
+    || fail "the task did not reach replied (it is $FINAL_STATUS)"
+
+  # …but it never passed through acked/running: that is the whole point.
+  EVENTS=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/task_events?task_id=$TASK_ID" \
+    | python3 -c "
+import json,sys
+print(' '.join(e.get('event_type','') for e in json.load(sys.stdin).get('events',[])))
+")
+  case "$EVENTS" in
+    *task.ack*) fail "the task was acked, but this scenario skips the ack too: $EVENTS" ;;
+  esac
+  case "$EVENTS" in
+    *task.started*) fail "the task reached running, but this scenario skips working too: $EVENTS" ;;
+  esac
+
+  check "skipped_working_is_warned" true
+  check "skipped_working_task_still_replies" true
+  check "skipped_working_never_reached_running" true
+  check "task_reaches_replied" true
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
   write_result true
   echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
   exit 0
