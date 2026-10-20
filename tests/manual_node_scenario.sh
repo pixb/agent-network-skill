@@ -130,6 +130,11 @@ print(json.load(urllib.request.urlopen(req))["task_id"])
 PY
 }
 record() { TRANSITIONS="${TRANSITIONS:+$TRANSITIONS|}$1"; }
+# The primary task's lifecycle is recorded as "status:<s>"; any other task
+# involved in the scenario is recorded as "other:<s>", so the protocol check
+# only ever looks at one task's path.
+record_status() { record "status:$(task_status "$1")"; }
+record_other() { record "other:$(task_status "$1")"; }
 record_verdict() { VERDICTS="${VERDICTS:+$VERDICTS|}$1"; }
 # check <name> <true|false> — a fact this scenario verified against the hub.
 check() { CHECKS="${CHECKS:+$CHECKS|}$1=$2"; }
@@ -139,30 +144,158 @@ second line, with punctuation & 特殊字符
 third line"
 TASK_ID="$(dispatch "$BODY")"
 record "dispatched"
-record "status:$(task_status "$TASK_ID")"
+record_status "$TASK_ID"
 
 if [ "$SCENARIO" = "stuck-delivered" ]; then
   run check >"$WORK/check.log" 2>&1 || fail "check failed"
   grep -q "nobody acked it" "$WORK/check.log" \
     || fail "check did not diagnose the un-acked task: $(tail -3 "$WORK/check.log")"
-  record_verdict "$(grep '^verdict:' "$WORK/check.log" | head -1 | sed 's/^verdict: //' | sed -E 's/task [0-9a-f-]{36}/task <id>/; s/after [0-9]+s/after <n>s/')"
+  record_verdict "$(grep '^verdict:' "$WORK/check.log" | head -1 | sed 's/^verdict: //' | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/after [0-9]+s/after <n>s/')"
   FINAL_STATUS="$(task_status "$TASK_ID")"
   check "stuck_task_stays_delivered" "$([ "$FINAL_STATUS" = "delivered" ] && echo true || echo false)"
   check "stuck_task_is_diagnosed" true
   check "task_reaches_replied" false
   check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── acked-by-other: somebody else acked the task under our nose ────────────
+if [ "$SCENARIO" = "acked-by-other" ]; then
+  # send_ack updates the task row by id without checking who owns it, so
+  # another node can ack a task that sits in OUR inbox.
+  OTHER_NTOK=$(curl -s -X POST "$HUB/api/auth/node-token" -H "Authorization: Bearer $UTOK" \
+    -H 'Content-Type: application/json' \
+    -d "{\"network_id\":\"$NET\",\"node_name\":\"scenario-other\",\"node_id\":\"n_scenother01\"}" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
+  python3 - "$HUB" "$OTHER_NTOK" "$TASK_ID" <<'PY' >/dev/null
+import json, sys, urllib.request
+hub, ntok, task_id = sys.argv[1:4]
+req = urllib.request.Request(hub + "/mcp", method="POST",
+    headers={"Authorization": "Bearer " + ntok, "Content-Type": "application/json",
+             "Accept": "application/json, text/event-stream"},
+    data=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"send_ack","arguments":{"task_id":task_id}}}).encode())
+urllib.request.urlopen(req).read()
+PY
+  record_status "$TASK_ID"
+
+  if run ack "$TASK_ID" >"$WORK/hijack-ack.log" 2>&1; then
+    fail "acking a task somebody else acked should have been refused"
+  fi
+  grep -q "acked by somebody else" "$WORK/hijack-ack.log" \
+    || fail "unexpected ack error: $(tail -1 "$WORK/hijack-ack.log")"
+  record_verdict "ack refused: $(tail -1 "$WORK/hijack-ack.log" | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
+
+  if run working "$TASK_ID" >"$WORK/hijack-working.log" 2>&1; then
+    fail "working a task somebody else acked should have been refused"
+  fi
+  grep -q "acked by somebody else" "$WORK/hijack-working.log" \
+    || fail "unexpected working error: $(tail -1 "$WORK/hijack-working.log")"
+
+  run check >"$WORK/check.log" 2>&1 || fail "check failed"
+  grep -q "ACKED BY SOMEONE ELSE" "$WORK/check.log" \
+    || fail "check did not flag the hijacked task: $(tail -5 "$WORK/check.log")"
+
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  check "hijacked_task_is_refused" true
+  check "task_reaches_replied" false
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── reassigned-away: the task leaves our inbox silently ───────────────────
+if [ "$SCENARIO" = "reassigned-away" ]; then
+  run inbox >/dev/null 2>&1 || fail "inbox failed"
+  python3 - "$HUB" "$UTOK" "$NET" "$TASK_ID" <<'PY' >/dev/null
+import json, sys, urllib.request
+hub, utok, net, task_id = sys.argv[1:5]
+req = urllib.request.Request(hub + "/mcp", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json",
+             "Accept": "application/json, text/event-stream"},
+    data=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"reassign_task","arguments":{"task_id":task_id,
+        "new_alias":"scenario-other","network_id":net}}}).encode())
+urllib.request.urlopen(req).read()
+PY
+  run check >"$WORK/check.log" 2>&1 || fail "check failed"
+  grep -q "left behind" "$WORK/check.log" \
+    || fail "check did not name the vanished task: $(tail -5 "$WORK/check.log")"
+  record_verdict "$(grep '^verdict:' "$WORK/check.log" | grep 'disappeared' | head -1 | sed 's/^verdict: //' | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  check "vanished_task_is_named" true
+  check "task_reaches_replied" false
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── two-tasks: one node, one slot, no parallelism ─────────────────────────
+if [ "$SCENARIO" = "two-tasks" ]; then
+  SECOND_ID="$(dispatch "a second task that must wait for the slot")"
+  record_other "$SECOND_ID"
+  run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
+  record_status "$TASK_ID"
+  run working "$TASK_ID" 30 >/dev/null 2>&1 || fail "working failed"
+  record_status "$TASK_ID"
+
+  if run working "$SECOND_ID" >"$WORK/second.log" 2>&1; then
+    fail "working a second task in parallel should have been refused"
+  fi
+  grep -q "one node runs one task at a time" "$WORK/second.log" \
+    || fail "unexpected refusal text: $(tail -1 "$WORK/second.log")"
+  record_verdict "second task refused: $(tail -1 "$WORK/second.log" | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
+  SECOND_STATUS="$(task_status "$SECOND_ID")"
+  [ "$SECOND_STATUS" = "delivered" ] \
+    || fail "the refused task must stay delivered (it is $SECOND_STATUS)"
+
+  run check >"$WORK/check.log" 2>&1 || fail "check failed"
+  grep -q "IN THE SLOT" "$WORK/check.log" \
+    || fail "check did not show which task holds the slot: $(tail -5 "$WORK/check.log")"
+  grep -q "only ONE slot" "$WORK/check.log" \
+    || fail "check did not warn that the tasks will not run in parallel: $(tail -5 "$WORK/check.log")"
+
+  # finishing the first task frees the slot for the second
+  run reply "$TASK_ID" "first task done" >/dev/null 2>&1 || fail "reply failed"
+  record_status "$TASK_ID"
+  run ack "$SECOND_ID" >/dev/null 2>&1 || fail "ack of the second task failed"
+  run working "$SECOND_ID" 10 >/dev/null 2>&1 || fail "working of the second task failed"
+  record_other "$SECOND_ID"
+
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  check "second_task_is_refused" true
+  check "task_reaches_replied" true
+  check "result_stored_on_task_row" true
+  check "transitions_observed" true
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
   write_result true
   echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
   exit 0
 fi
 
 run ack "$TASK_ID" >"$WORK/ack.log" 2>&1 || fail "ack failed: $(tail -1 "$WORK/ack.log")"
-record "status:$(task_status "$TASK_ID")"
+record_status "$TASK_ID"
 run working "$TASK_ID" 40 >"$WORK/working.log" 2>&1 || fail "working failed: $(tail -1 "$WORK/working.log")"
-record "status:$(task_status "$TASK_ID")"
+record_status "$TASK_ID"
 run reply "$TASK_ID" "scenario done: everything finished" >"$WORK/reply.log" 2>&1 \
   || fail "reply failed: $(tail -1 "$WORK/reply.log")"
-record "status:$(task_status "$TASK_ID")"
+record_status "$TASK_ID"
 FINAL_STATUS="$(task_status "$TASK_ID")"
 [ "$FINAL_STATUS" = "replied" ] || fail "the task did not reach replied (it is $FINAL_STATUS)"
 
@@ -172,6 +305,11 @@ case "$RESULT" in *"scenario done"*) ;; *) fail "the result was not stored on th
 check "task_reaches_replied" true
 check "result_stored_on_task_row" true
 check "transitions_observed" true
+check "stuck_task_is_diagnosed" false
+check "terminal_task_refuses_second_reply" false
+check "hijacked_task_is_refused" false
+check "vanished_task_is_named" false
+check "second_task_is_refused" false
 
 if [ "$SCENARIO" = "terminal-refused" ]; then
   if run reply "$TASK_ID" "second attempt" >"$WORK/second.log" 2>&1; then
@@ -179,9 +317,12 @@ if [ "$SCENARIO" = "terminal-refused" ]; then
   fi
   grep -q "already replied" "$WORK/second.log" \
     || fail "unexpected error text: $(tail -1 "$WORK/second.log")"
-  record_verdict "second reply refused: $(tail -1 "$WORK/second.log" | sed -E 's/task [0-9a-f-]{36}/task <id>/')"
+  record_verdict "second reply refused: $(tail -1 "$WORK/second.log" | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
   check "terminal_task_refuses_second_reply" true
   check "stuck_task_is_diagnosed" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
 fi
 
 write_result true

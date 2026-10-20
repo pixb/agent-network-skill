@@ -148,6 +148,7 @@ STATE_DIR="${STATE_DIR_OVERRIDE:-$(dirname "$CONFIG")}"
 PIDFILE="$STATE_DIR/manual-heartbeat.pid"
 LOGFILE="$STATE_DIR/manual-heartbeat.log"
 STATUSFILE="$STATE_DIR/manual-status.json"
+SEENFILE="$STATE_DIR/manual-seen.json"
 CLIENT="$STATE_DIR/anet-manual-node-client.mjs"
 
 mkdir -p "$STATE_DIR"
@@ -164,6 +165,7 @@ import { dirname } from "node:path";
 
 const CONFIG = process.env.ANET_MANUAL_CONFIG;
 const STATUSFILE = process.env.ANET_MANUAL_STATUSFILE;
+const SEENFILE = process.env.ANET_MANUAL_SEENFILE;
 const MODE = process.argv[2] || "watch";
 const INTERVAL = Number(process.env.ANET_MANUAL_INTERVAL || 30) * 1000;
 const HUB_OVERRIDE = process.env.ANET_MANUAL_HUB || "";
@@ -267,19 +269,40 @@ async function mcp(name, args, bearer) {
 }
 
 // ── local state (what the heartbeat keeps re-reporting) ────────────────────
+// The hub gives one node exactly ONE session slot: (network_id, alias) is
+// unique in `sessions` (db.ts idx_sessions_network_alias_unique) and that row
+// carries a single status + a single 200-char task preview. A real runtime
+// therefore runs one task at a time (the codex bridge FIFO-queues the rest).
+// The local state mirrors that: it remembers which task_id holds the slot, so
+// a second `working` call can be refused instead of silently overwriting the
+// first task's text in the session row.
 function readState() {
   const s = readJson(STATUSFILE, null);
-  if (!s) return { status: "idle", progress: null, task: null };
+  if (!s) return { status: "idle", progress: null, task: null, task_id: null };
   return {
     status: STATES.includes(s.status) ? s.status : "idle",
     progress: s.progress ?? null,
     task: s.task ?? null,
+    task_id: s.task_id ?? null,
   };
 }
 function writeState(s) {
   try {
     mkdirSync(dirname(STATUSFILE), { recursive: true, mode: 0o700 });
     writeFileSync(STATUSFILE, JSON.stringify(s));
+  } catch {}
+}
+
+// Task ids this node has acked, and task ids it has seen. The ack list is
+// what separates "I acked it" from "somebody else acked it" (see the
+// ownership check in ackTask/workingTask).
+function readSeen() {
+  return readJson(SEENFILE, {}) || {};
+}
+function writeSeen(seen) {
+  try {
+    mkdirSync(dirname(SEENFILE), { recursive: true, mode: 0o700 });
+    writeFileSync(SEENFILE, JSON.stringify(seen));
   } catch {}
 }
 
@@ -402,6 +425,18 @@ async function listInbox() {
     if (m.context) console.log("context :", m.context);
     if (m.meta && Object.keys(m.meta).length) console.log("meta    :", JSON.stringify(m.meta));
   }
+  // Remember what this node has seen, so a task that later disappears (taken
+  // away, expired, retried) can be named instead of vanishing silently.
+  const seen = readSeen();
+  let changed = false;
+  for (const m of messages) {
+    const id = m.task_id || m.id;
+    if (!seen[id]) {
+      seen[id] = { first_seen: nowIso() };
+      changed = true;
+    }
+  }
+  if (changed) writeSeen(seen);
   out({ ok: true, pending: messages.length, messages: messages.map((m) => ({ id: m.task_id || m.id, from: m.from_session })) });
 }
 
@@ -411,12 +446,67 @@ async function showTask(id) {
   if (!r.ok) die(`task ${id}: ${r.error || "not found"}`, 5);
 }
 
+// The hub gives every node ONE session slot: (network_id, alias) is unique in
+// `sessions` and that single row carries one status + one task preview. A
+// second `report_status` overwrites the first task's text. So a manual node
+// works one task at a time, exactly like a real runtime does (the codex bridge
+// FIFO-queues ordinary network tasks).
+//
+// This returns the task id currently holding the slot, or null.
+function slotHolder() {
+  const s = readState();
+  return s.task_id || null;
+}
+
+async function assertSlotFree(taskId) {
+  const holder = slotHolder();
+  if (!holder || holder === taskId) return;
+  const t = await mcp("get_task", { task_id: holder });
+  const status = t && t.ok && t.task ? t.task.status : "unknown";
+  if (TERMINAL.includes(status)) {
+    // The previous occupant is finished; the slot is free in fact even though
+    // the local state still names it. Clear it and carry on.
+    writeState({ status: "idle", progress: 0, task: null, task_id: null });
+    return;
+  }
+  die(
+    `this node already holds task ${holder} (hub status: ${status}) — ` +
+    "one node runs one task at a time, because the hub gives a node a single " +
+    "session slot. Finish it first: reply " + holder +
+    "   (or, to abandon it: cancel_task " + holder + ")",
+    5,
+  );
+}
+
+// A task that is `acked` but STILL has an unacked inbox row on our side was
+// acked by somebody else: our own ack removes the row from get_inbox, so a
+// row that survives an ack belongs to another party's ack (send_ack updates
+// the task by id without checking who owns it).
+async function assertNotAckedElsewhere(id) {
+  const t = await mcp("get_task", { task_id: id });
+  const status = t && t.ok && t.task ? t.task.status : null;
+  if (status !== "acked" && status !== "running") return null;
+  const seen = readSeen();
+  if (seen[id] && seen[id].acked_by_me) return null;
+  const inbox = await mcp("get_inbox", { alias, limit: 100, network_id });
+  const mine = (inbox.messages || []).map((m) => m.task_id || m.id);
+  if (!mine.includes(id)) return null; // acked by us (our row is gone)
+  die(
+    `task ${id} was acked by somebody else (hub status: ${status}) — it is still ` +
+    "in your inbox but you never acked it, so another party claimed it. " +
+    "Do not start it; ask the planner who owns it now, or cancel_task " + id,
+    5,
+  );
+  return null;
+}
+
 async function ackTask(id) {
   const before = await mcp("get_task", { task_id: id });
   if (!before.ok || !before.task) die(`task ${id} not found`, 5);
   if (TERMINAL.includes(before.task.status)) {
     die(`task ${id} is already ${before.task.status} — it cannot be acked`, 5);
   }
+  await assertNotAckedElsewhere(id);
   const r = await mcp("ack_inbox", { alias, message_id: id, network_id });
   if (!r.ok) {
     die(
@@ -427,6 +517,9 @@ async function ackTask(id) {
       5,
     );
   }
+  const seen = readSeen();
+  seen[id] = { ...(seen[id] || {}), acked_by_me: true, acked_at: nowIso() };
+  writeSeen(seen);
   const after = await mcp("get_task", { task_id: id });
   console.log(`acked ${id} (hub task status: ${after.task ? after.task.status : "?"})`);
   out({ ok: true, task_id: id, status: after.task ? after.task.status : null });
@@ -438,6 +531,8 @@ async function workingTask(id, progress) {
   if (TERMINAL.includes(t.task.status)) {
     die(`task ${id} is already ${t.task.status} — a terminal task cannot go back to running`, 5);
   }
+  await assertNotAckedElsewhere(id);
+  await assertSlotFree(id);
   // The body must be byte-identical to what the hub stored: report_status
   // matches on to_name + content equality, so it is fetched, never retyped.
   const body = t.task.content;
@@ -446,12 +541,16 @@ async function workingTask(id, progress) {
     // inbox row keeps the node pinned as in-flight. Ack first.
     const a = await mcp("ack_inbox", { alias, message_id: id, network_id });
     if (!a.ok) die(`could not ack ${id} before starting it: ${a.error || "unknown"}`, 5);
+    const seen = readSeen();
+    seen[id] = { ...(seen[id] || {}), acked_by_me: true, acked_at: nowIso() };
+    writeSeen(seen);
     console.log(`acked ${id} first (it was still delivered)`);
   }
   const state = {
     status: "working",
     progress: Number.isFinite(progress) ? progress : null,
     task: body,
+    task_id: id,
   };
   writeState(state);
   await reportOnce(state);
@@ -474,6 +573,7 @@ async function setState(state, progress) {
     status: state,
     progress: Number.isFinite(progress) ? progress : 0,
     task: state === "working" ? prev.task : null,
+    task_id: state === "working" ? prev.task_id : null,
   };
   writeState(next);
   await reportOnce(next);
@@ -510,8 +610,9 @@ async function replyTask(id, text, status, via) {
     });
     if (!r.ok) die(`report_completion failed: ${JSON.stringify(r)}`, 5);
   }
-  writeState({ status: "idle", progress: 0, task: null });
-  await reportOnce({ status: "idle", progress: 0, task: null });
+  // The slot is free once this task is closed: the next task may take it.
+  writeState({ status: "idle", progress: 0, task: null, task_id: null });
+  await reportOnce({ status: "idle", progress: 0, task: null, task_id: null });
   const after = await mcp("get_task", { task_id: id });
   console.log(`replied to ${id} (hub task status: ${after.task ? after.task.status : "?"})`);
   out({ ok: true, task_id: id, status: after.task ? after.task.status : null });
@@ -537,44 +638,100 @@ async function check() {
   const session = (status.sessions || []).find((s) => s.alias === alias) || null;
   const inbox = await mcp("get_inbox", { alias, limit: 50, network_id });
   const pending = inbox.messages || [];
+  const pendingIds = pending.map((m) => m.task_id || m.id);
   const tasks = await mcp("list_tasks", { alias, network_id, limit: 50 });
   const open = (tasks.tasks || []).filter(
     (t) => ["created", "delivered", "acked", "running"].includes(t.status),
   );
+  const seen = readSeen();
+  const holder = slotHolder();
 
   console.log(`node        : ${alias}`);
   console.log(`session     : ${session ? session.status : "no session row (never registered)"}`);
   if (session) {
     console.log(`last seen   : ${session.last_seen_at || session.updated_at || "?"}`);
-    console.log(`hub task txt: ${session.task || "(empty)"}`);
     console.log(`queue depth : ${session.queue_depth == null ? "?" : session.queue_depth}`);
   }
-  console.log(`pending     : ${pending.length} inbox row(s), ${open.length} open task(s)`);
+
+  // The hub gives a node ONE session slot: one status, one task preview. The
+  // queue is a separate thing (the task rows). Show both, and say which task
+  // holds the slot — otherwise "session: working" hides that a second task is
+  // waiting and will not start by itself.
+  console.log("");
+  console.log("slot (one per node — the hub keeps a single task preview here):");
+  console.log(`  holds     : ${holder || "(free)"}`);
+  console.log(`  hub text  : ${session && session.task ? session.task : "(empty)"}`);
+  console.log("");
+  console.log(`queue (${open.length} open task(s), ${pending.length} inbox row(s)):`);
   for (const t of open) {
     const age = ageSeconds(t.created_at);
+    const mine = seen[t.task_id] && seen[t.task_id].acked_by_me;
+    const role = t.task_id === holder
+      ? "IN THE SLOT"
+      : t.status === "acked" && !mine && pendingIds.includes(t.task_id)
+        ? "ACKED BY SOMEONE ELSE"
+        : "waiting for the slot";
     console.log(
-      `- ${t.task_id} status=${t.status} age=${age == null ? "?" : age + "s"} from=${t.from_name}`,
+      `- ${t.task_id} status=${t.status} age=${age == null ? "?" : age + "s"} from=${t.from_name}  ${role}`,
     );
   }
+  if (!open.length) console.log("  (none)");
 
+  // Tasks this node saw and then lost: reassigned away, expired, or retried.
+  // They vanish from the inbox silently, so without this list "the previous
+  // task was taken by somebody else" is indistinguishable from "it never
+  // existed".
+  const vanished = [];
+  for (const t of open) {
+    if (!seen[t.task_id]) seen[t.task_id] = { first_seen: nowIso() };
+  }
+  for (const id of Object.keys(seen)) {
+    if (open.some((t) => t.task_id === id)) continue;
+    if (pendingIds.includes(id)) continue;
+    if (!seen[id].disappeared_at) {
+      seen[id] = { ...seen[id], disappeared_at: nowIso() };
+      vanished.push(id);
+    }
+  }
+  writeSeen(seen);
+  if (vanished.length) {
+    console.log("");
+    console.log(`left behind (${vanished.length} task(s) disappeared from your inbox):`);
+    for (const id of vanished) {
+      console.log(`- ${id}  (reassigned away / expired / retried — see: show ${id})`);
+    }
+  }
+
+  console.log("");
   if (!session) {
     verdict.push("no session row — the node never registered: run init, then start");
   } else {
     for (const t of open) {
       const age = ageSeconds(t.created_at);
+      const mine = seen[t.task_id] && seen[t.task_id].acked_by_me;
       if (t.status === "delivered") {
         verdict.push(
           `task ${t.task_id} is still delivered` +
           (age == null ? "" : ` after ${age}s`) +
           " — nobody acked it: the node is reachable but the work never started",
         );
+      } else if (t.status === "acked" && !mine && pendingIds.includes(t.task_id)) {
+        verdict.push(
+          `task ${t.task_id} is acked but you never acked it and it is still in your inbox — ` +
+          "another party claimed it: do NOT start it, ask the planner who owns it now",
+        );
       } else if (t.status === "acked") {
         verdict.push(
           `task ${t.task_id} is acked but not running` +
-          " — the body was never reported verbatim: use working <task_id>",
+          " — the body was never reported verbatim: use working " + t.task_id,
         );
       } else if (t.status === "running") {
-        verdict.push(`task ${t.task_id} is running — the work is in progress`);
+        verdict.push(
+          t.task_id === holder
+            ? `task ${t.task_id} is running — the work is in progress`
+            : `task ${t.task_id} is running but it is not the task in your slot — ` +
+              "somebody else moved it to running",
+        );
       } else if (t.status === "created") {
         verdict.push(`task ${t.task_id} was created but never delivered to the inbox`);
       }
@@ -582,10 +739,31 @@ async function check() {
     if (!open.length) {
       verdict.push("no open tasks — nothing is in flight");
     }
+    if (open.length > 1) {
+      verdict.push(
+        `${open.length} tasks are open but a node has only ONE slot — ` +
+        "they will NOT run in parallel; finish the one in the slot first",
+      );
+    }
+  }
+  for (const id of vanished) {
+    verdict.push(
+      `task ${id} disappeared from your inbox — it was reassigned away, expired, or retried; ` +
+      "run: show " + id,
+    );
   }
   console.log("");
   for (const v of verdict) console.log("verdict: " + v);
-  out({ ok: true, alias, session: session ? session.status : null, pending: pending.length, open_tasks: open.length, verdict });
+  out({
+    ok: true,
+    alias,
+    session: session ? session.status : null,
+    slot: holder,
+    pending: pending.length,
+    open_tasks: open.length,
+    vanished,
+    verdict,
+  });
 }
 
 // ── entry point ────────────────────────────────────────────────────────────
@@ -645,6 +823,7 @@ cmd_start() {
   write_client
   env \
   "ANET_MANUAL_CONFIG=$CONFIG" "ANET_MANUAL_STATUSFILE=$STATUSFILE" \
+  "ANET_MANUAL_SEENFILE=$SEENFILE" \
   "ANET_MANUAL_INTERVAL=$INTERVAL" "ANET_MANUAL_HUB=$HUB_OVERRIDE" \
   "ANET_MANUAL_NETWORK=$NETWORK_OVERRIDE" "ANET_MANUAL_NODE=$NODE_NAME" \
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \
@@ -687,6 +866,7 @@ cmd_run() {
   write_client
   exec env \
   "ANET_MANUAL_CONFIG=$CONFIG" "ANET_MANUAL_STATUSFILE=$STATUSFILE" \
+  "ANET_MANUAL_SEENFILE=$SEENFILE" \
   "ANET_MANUAL_INTERVAL=$INTERVAL" "ANET_MANUAL_HUB=$HUB_OVERRIDE" \
   "ANET_MANUAL_NETWORK=$NETWORK_OVERRIDE" "ANET_MANUAL_NODE=$NODE_NAME" \
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \

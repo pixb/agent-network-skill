@@ -65,7 +65,7 @@ universal `~/.agents/skills/`). Use `--platform <name>`, `--project`, `--path <d
 | File | Purpose |
 |---|---|
 | [SKILL.md](SKILL.md) | The full protocol: connection and tokens, both role flows, state machine, parameter hard rules, the manual-node section, Gotchas |
-| [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: the four transitions, token rules, the online-vs-working diagnosis, failure modes |
+| [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: one node one slot, the four transitions, how a task can leave you, token rules, the online-vs-working diagnosis, failure modes |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |

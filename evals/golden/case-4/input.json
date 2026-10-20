@@ -1,0 +1,4 @@
+{
+  "scenario": "acked-by-other",
+  "hub_source": "/vol1/1000/docker/nec8-docker/agent-network/server"
+}

@@ -41,6 +41,10 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   session row.
 - **A task stuck in `delivered` usually means nobody acked it**, not that the node is offline. The
   hub's `delivered_stale_30s` / `_60s` patrol warnings say the same thing.
+- **A node has ONE task slot, not one per task.** `sessions` is unique on `(network_id, alias)` and
+  holds a single `status` and a single 200-char task preview, so a second `report_status` overwrites
+  the first task's text. Real runtimes queue the rest FIFO for the same reason. Take one task, finish
+  it, then take the next.
 - **The task body must be byte-identical.** `report_status(status="working", task=…)` matches on
   exact equality, so the body is fetched from the hub, never retyped or summarised.
 - **`report_status` is node-only.** A user token gets `network_token_required`; a manual node needs
@@ -49,3 +53,6 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   id is refused with `node_owner_mismatch`; reuse the id the hub already knows.
 - **The hub address and the network id travel together.** A `network_id` from a different hub's
   config means nothing here — the script only falls back to the global config when the hubs match.
+- **A task can be taken away under you.** Another node cannot `ack_inbox` your row, but the planner
+  can `reassign_task` it away and *anybody* can `send_ack` it (which updates the task by id without
+  checking ownership). `check` names both cases; `ack`/`working` refuse a task somebody else claimed.

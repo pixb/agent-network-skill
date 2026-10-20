@@ -1,0 +1,28 @@
+{
+  "scenario": "two-tasks",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "other:delivered",
+    "status:acked",
+    "status:running",
+    "status:replied",
+    "other:running"
+  ],
+  "verdicts": [
+    "second task refused: this node already holds task <id> (hub status: running) \u2014 one node runs one task at a time, because the hub gives a node a single session slot. Finish it first: reply <id>   (or, to abandon it: cancel_task <id>)"
+  ],
+  "checks": {
+    "second_task_is_refused": true,
+    "task_reaches_replied": true,
+    "result_stored_on_task_row": true,
+    "transitions_observed": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false
+  },
+  "error": null
+}

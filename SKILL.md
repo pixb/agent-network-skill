@@ -342,16 +342,36 @@ machine that owns the node. It is the whole protocol, made explicit:
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
 why the task body is fetched from the hub instead of retyped.
 
-**The one thing every agent must know**: a heartbeat and a task are independent facts. A healthy
-heartbeat with `sessions.status = idle` looks exactly like a node that is doing nothing while its
-task sits untouched. "Online" is not "working" — the task row is the only evidence that work
-started, and it only moves when somebody acks and reports the body verbatim. When a task looks
-stuck, run `check` and read the verdict per task, not the session status:
+**Two facts that decide how a manual node behaves** (both are hub storage
+semantics, not conventions):
 
-- **still `delivered`** — nobody acked it; the work never began (the hub's patrol logs
-  `task.warning.delivered_stale_30s` / `_60s` for the same condition)
-- **`acked` but not `running`** — the body was never reported byte-for-byte
+1. **A node has one task slot, not one per task.** `sessions` is unique on
+   `(network_id, alias)` and that row holds a single `status` and a single 200-char
+   task preview — a second `report_status` overwrites the first task's text. Real
+   runtimes queue the rest FIFO for the same reason. So a manual node works **one
+   task at a time**; the script refuses a second concurrent task rather than
+   letting the first vanish from the session view.
+2. **"Online" is not "working", and a task can leave you silently.** A heartbeat
+   plus `sessions.status = idle` looks exactly like a node doing nothing while its
+   task sits untouched — read the task row, never the session row. And three
+   things can take a task away: another node cannot `ack_inbox` it (a node token
+   only acks its own rows), but the planner can `reassign_task` it away, and
+   *anybody* can `send_ack` it — which updates the task by id **without checking
+   ownership**, so a task can be `acked` under a manual node that never acked it.
+   `check` names all three cases ("left behind", "ACKED BY SOMEONE ELSE"), and
+   `ack`/`working` refuse a task somebody else claimed, so two nodes never work
+   one task.
+
+When a task looks stuck, run `check` and read the verdict per task, not the
+session status:
+
+- **still `delivered`** — nobody acked it; the work never began (the hub's patrol
+  logs `task.warning.delivered_stale_30s` / `_60s` for the same condition)
+- **`acked` but not `running`** — the body was never reported byte-for-byte, *or*
+  somebody else acked it (the row is still in your inbox, so you never acked it)
 - **`running`** — genuinely in progress
+- **left behind** — it disappeared from your inbox (reassigned away, expired, or
+  retried)
 
 ## Gotchas
 
@@ -363,6 +383,9 @@ stuck, run `check` and read the verdict per task, not the session status:
 - **A task stuck in `delivered` is usually "nobody acked it", not "the node is offline"** — the hub's
   `delivered_stale_*` patrol warnings say exactly that, and a manual node (§7) can be heartbeating
   happily while its task sits untouched. Read the task row, not the session row.
+- **A node has ONE task slot.** Dispatching two tasks to a manual node does not make it work on two:
+  the second overwrites the first in the session row, and the first disappears from the node's status
+  view while still sitting in the task table. Take one, finish it, then take the next.
 - **`report_status` is node-only**: a user token gets `network_token_required`. A manual node needs
   its own `ntok_`, which is why `anet node create` is not the way to make one — its runtime
   whitelist has seven entries and `manual` is not among them.

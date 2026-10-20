@@ -36,7 +36,11 @@
     },
     {
       "invocation": "/agent-network-skill the manual node got a task but nothing started, check it",
-      "description": "The operator runs scripts/anet_manual_node.sh check and reads the per-task verdict (delivered = never acked, acked = body not reported, running = in progress)"
+      "description": "The operator runs scripts/anet_manual_node.sh check and reads the per-task verdict (delivered = never acked, acked-by-someone-else = claimed under us, running = in progress, left behind = reassigned away)"
+    },
+    {
+      "invocation": "/agent-network-skill the manual node was given two tasks",
+      "description": "The operator runs check: a node has one session slot, so the second task waits its turn; the script refuses to start it in parallel"
     }
   ],
   "permissions_systems": [
@@ -96,10 +100,12 @@
       "how do I fix a task stuck in acked",
       "verify <worker-alias>'s tasks",
       "the manual node got a task but nothing started, check it",
+      "the manual node was given two tasks, which one is it on",
       "派任务给 <worker-alias>",
       "收任务并按协议汇报",
       "任务卡在 acked 怎么修",
       "手动节点收到任务了但没人开工，怎么看",
+      "手动节点手上有两个任务",
       "任务没被 ack"
     ],
     "should_not_trigger": [

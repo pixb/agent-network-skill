@@ -1,0 +1,21 @@
+{
+  "scenario": "reassigned-away",
+  "ok": true,
+  "final_status": "delivered",
+  "transitions": [
+    "dispatched",
+    "status:delivered"
+  ],
+  "verdicts": [
+    "task <id> disappeared from your inbox \u2014 it was reassigned away, expired, or retried; run: show <id>"
+  ],
+  "checks": {
+    "vanished_task_is_named": true,
+    "task_reaches_replied": false,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

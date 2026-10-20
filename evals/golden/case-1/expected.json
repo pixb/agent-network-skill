@@ -13,7 +13,12 @@
   "checks": {
     "task_reaches_replied": true,
     "result_stored_on_task_row": true,
-    "transitions_observed": true
+    "transitions_observed": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
   },
   "error": null
 }

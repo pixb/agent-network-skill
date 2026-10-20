@@ -1,0 +1,22 @@
+{
+  "scenario": "acked-by-other",
+  "ok": true,
+  "final_status": "acked",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:acked"
+  ],
+  "verdicts": [
+    "ack refused: task <id> was acked by somebody else (hub status: acked) \u2014 it is still in your inbox but you never acked it, so another party claimed it. Do not start it; ask the planner who owns it now, or cancel_task <id>"
+  ],
+  "checks": {
+    "hijacked_task_is_refused": true,
+    "task_reaches_replied": false,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

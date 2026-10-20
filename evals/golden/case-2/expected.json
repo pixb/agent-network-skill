@@ -13,7 +13,10 @@
     "stuck_task_stays_delivered": true,
     "stuck_task_is_diagnosed": true,
     "task_reaches_replied": false,
-    "terminal_task_refuses_second_reply": false
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
   },
   "error": null
 }

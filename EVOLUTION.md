@@ -57,3 +57,38 @@ Appended automatically by scripts/run_evals.py (and scripts/evolve.py) when a ch
 ]
 ```
 
+## 2026-10-20T08:23:33Z — run_evals --rollout FAILED
+
+- counts: passed=22, failed=2, errors=0, regressions=0, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-6",
+    "criterion": "hub-row-is-the-source-of-truth",
+    "status": "fail"
+  },
+  {
+    "case": "case-6",
+    "criterion": "transitions-follow-the-protocol",
+    "status": "fail"
+  }
+]
+```
+
+## 2026-10-20T08:26:05Z — run_evals --rollout FAILED
+
+- counts: passed=29, failed=1, errors=0, regressions=0, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-6",
+    "criterion": "transitions-follow-the-protocol",
+    "status": "fail"
+  }
+]
+```
+
