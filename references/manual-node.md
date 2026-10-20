@@ -241,8 +241,44 @@ genuinely stuck. `idle` clears the task text as well.
 
 ## Chat that does not touch the task
 
-`say <alias> "<text>"` sends a message and leaves the task open. Use it for questions
-or status pings; never use it to close work, because it moves nothing on the task row.
+`say <alias> "<text>"` sends a message to a **node** and leaves every task open. Use it for
+questions or status pings; never use it to close work, because it moves nothing on the task row.
+
+`dm <username> "<text>"` sends a message to a **human** (it lands in that user's inbox as an
+agent message). It also leaves every task open.
+
+## Two kinds of inbox row: tasks and chat
+
+`get_inbox` returns inbox **rows**, and the two kinds are answered by different tools. The
+script labels each row so the difference is never guesswork.
+
+| row | what it is | how you answer it |
+|---|---|---|
+| `type: "task"` | dispatched work, has a `task_id` | `working <task_id>` → work → `reply <task_id>` |
+| `type: "message"` | chat, **no task id** | `dm <username> "<text>"` |
+
+**A chat row cannot be answered with `reply` or `send_reply`.** Both resolve the id against
+the `tasks` table, so a message id comes back as `task not found` (`reply_task_not_found` on
+the hub side). A chat row has no lifecycle: nothing to ack, nothing to close, no status.
+
+### Why `say` cannot reach a human
+
+`say` is `send_message`, and `send_message` needs a `sessions` row — sessions are **nodes**.
+A human user has no session row, so `say admin` answers `alias_not_found`. That is the hub
+working as designed, not a broken target. The tool that addresses a *user* is
+`send_desktop_message` (`to_username` / `to_user_id`), which is what `dm` calls. It works
+from a node token, and the message lands in the user's inbox.
+
+`dm` reports `persisted, not delivered live: no live subscriber` when nobody is watching the
+dashboard — that is normal, and it means the message is **waiting in the user's inbox**, not
+lost.
+
+### Finished tasks keep their inbox row
+
+The hub does not delete a closed task's inbox row; it stays until it is acked. So a task you
+already replied to keeps showing up in `inbox` next to real work. `inbox` looks each task row
+up and marks it `FINISHED — nothing to do`, and `check` counts it separately from the open
+tasks, so the queue and the inbox never get confused.
 
 ## Where the state lives
 
@@ -277,5 +313,7 @@ from "somebody else acked it", and how it can name a task that disappeared.
 | `reply_task_terminal` | someone else closed the task | `check` to see who |
 | `this node already holds task <id>` | a second task was started while one was running | finish the first (`reply <id>`); a node has one slot |
 | `was acked by somebody else` | another node `send_ack`ed the task while it sat in your inbox | do not start it; ask the planner who owns it now |
+| `alias_not_found` on `say` | the target is not a node (a human user has no session row) | use `dm <username> "<text>"` for a human |
+| `task <id> not found` on `reply`, but the id is in your inbox | it is a **chat message**, not a task | `dm <from_session> "<text>"` |
 | heartbeat log says `hub unreachable` | wrong `--hub`, or the hub is down | fix the address in the config |
 | `node_owner_mismatch` on `init` | that alias belongs to another node id or owner | reuse the existing config, or pick another alias |

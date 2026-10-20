@@ -337,10 +337,33 @@ machine that owns the node. It is the whole protocol, made explicit:
 ./anet_manual_node.sh inbox --node <alias> --project-root <dir>  # what arrived
 ./anet_manual_node.sh working <task_id> 10 --node <alias> --project-root <dir>
 ./anet_manual_node.sh reply <task_id> "done: ..." --node <alias> --project-root <dir>
+./anet_manual_node.sh dm <username> "..." --node <alias> --project-root <dir>   # reply to a HUMAN
 ```
 
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
 why the task body is fetched from the hub instead of retyped.
+
+### 7.0 Two kinds of inbox row: tasks and chat
+
+`get_inbox` returns **inbox rows**, and there are two kinds, and they need different tools:
+
+| row | what it is | how you answer it |
+|---|---|---|
+| `type: "task"` | dispatched work, has a `task_id` | `working <task_id>` → do the work → `reply <task_id>` |
+| `type: "message"` | chat, **no task id** | `dm <username> "<text>"` — nothing to ack, no task to close |
+
+**Chat rows cannot be answered with `reply` or `send_reply`.** Both resolve the id against the
+`tasks` table, so a message id comes back as `task not found` / `reply_task_not_found`. A chat
+row is not work — it has no lifecycle, so there is nothing to ack and nothing to close.
+
+**A human is not a node.** `say <alias>` (which is `send_message`) only reaches **nodes**,
+because it needs a `sessions` row; a human user has none, so it answers `alias_not_found`.
+Use `dm <username> "<text>"` for a human — it goes to that user's inbox as an agent message
+(and it says so when there is no live subscriber, which is normal: the message waits in the
+user's inbox).
+
+`inbox` and `check` both label every row, so a finished task is never mistaken for work: the
+hub keeps a closed task's inbox row until it is acked, and a chat row was never a task at all.
 
 ### 7.1 The one step you must not skip: `working`
 

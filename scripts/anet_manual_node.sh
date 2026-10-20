@@ -29,7 +29,9 @@
 #                              [--via completion|send_reply] [options]
 #                                                    terminal reply
 #   anet_manual_node.sh say     <alias> "<text>" [options]
-#                                                    chat only, task stays open
+#                                                    chat to a NODE, task stays open
+#   anet_manual_node.sh dm      <username> "<text>" [--title "<title>"] [options]
+#                                                    chat to a HUMAN, task stays open
 #   anet_manual_node.sh check   [options]              hub-side truth report
 #
 # options (flags override environment, environment overrides defaults):
@@ -70,6 +72,7 @@ TOKEN_OVERRIDE="${ANET_MANUAL_TOKEN:-}"
 USER_TOKEN_OVERRIDE="${ANET_MANUAL_USER_TOKEN:-}"
 JSON_OUT=0
 REPLY_VIA=""
+DM_TITLE=""
 
 COMMAND=""
 ARGS=()
@@ -86,6 +89,7 @@ while [ $# -gt 0 ]; do
     --token) TOKEN_OVERRIDE="${2:-}"; shift 2 ;;
     --user-token) USER_TOKEN_OVERRIDE="${2:-}"; shift 2 ;;
     --via) REPLY_VIA="${2:-}"; shift 2 ;;
+    --title) DM_TITLE="${2:-}"; shift 2 ;;
     --json) JSON_OUT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [ $# -gt 0 ]; do ARGS+=("$1"); shift; done ;;
@@ -172,6 +176,7 @@ const HUB_OVERRIDE = process.env.ANET_MANUAL_HUB || "";
 const NETWORK_OVERRIDE = process.env.ANET_MANUAL_NETWORK || "";
 const TOKEN_OVERRIDE = process.env.ANET_MANUAL_TOKEN || "";
 const USER_TOKEN_OVERRIDE = process.env.ANET_MANUAL_USER_TOKEN || "";
+const DM_TITLE = process.env.ANET_MANUAL_DM_TITLE || "";
 const ALIAS_OVERRIDE = process.env.ANET_MANUAL_NODE || "";
 const JSON_OUT = process.env.ANET_MANUAL_JSON === "1";
 const ARGS = process.argv.slice(3);
@@ -325,7 +330,16 @@ async function reportOnce(state) {
     ` ok=${r.ok} inbox=${r.inbox_count == null ? "?" : r.inbox_count}`,
   );
   if ((r.inbox_count || 0) > 0) {
-    console.log(`${nowIso()} ${r.inbox_count} pending task(s) — run: ${SCRIPT_NAME} inbox`);
+    // inbox_count is the number of UNACKED inbox ROWS — it counts finished
+    // tasks (the hub keeps their row until it is acked) and chat messages
+    // too, so it is not a count of work waiting. Do not print it as
+    // "pending task(s)": that is what makes an idle node look busy forever.
+    // The command to run is printed with the script's own name, so it never
+    // points at a script that has been replaced.
+    console.log(
+      `${nowIso()} ${r.inbox_count} unacked inbox row(s) — run: ${SCRIPT_NAME} inbox ` +
+      `--node ${alias}   (it shows which are real tasks, which are finished, and which are chat)`,
+    );
   }
   return r;
 }
@@ -415,12 +429,35 @@ async function listInbox() {
     out({ ok: true, pending: 0, messages: [] });
     return;
   }
+  // The hub's inbox rows are NOT filtered by task status: a task that was
+  // closed (replied/failed/...) leaves its inbox row behind when it was
+  // never ack_inbox'ed, so a finished task keeps showing up next to real
+  // work. Look each task row up and label it, so a finished task is not
+  // mistaken for something still to do.
+  const taskStatus = {};
+  for (const m of messages) {
+    if (m.type !== "task") continue;
+    const id = m.task_id || m.id;
+    if (taskStatus[id]) continue;
+    try {
+      const t = await mcp("get_task", { task_id: id });
+      taskStatus[id] = t && t.ok && t.task ? t.task.status : "unknown";
+    } catch {
+      taskStatus[id] = "unknown";
+    }
+  }
+  const isOpen = (s) => ["created", "delivered", "acked", "running"].includes(s);
   for (const m of messages) {
     const id = m.task_id || m.id;
+    const st = m.type === "task" ? taskStatus[id] : null;
     console.log("-".repeat(60));
     console.log("id      :", id);
     console.log("from    :", m.from_session);
-    console.log("type    :", m.type, "| priority:", m.priority, "| at:", m.created_at, m.late ? "(late)" : "");
+    console.log(
+      "type    :", m.type,
+      m.type === "task" ? "| task status: " + st + (isOpen(st) ? "" : "  (FINISHED — nothing to do)") : "",
+      "| priority:", m.priority, "| at:", m.created_at, m.late ? "(late)" : "",
+    );
     console.log("content :", m.content);
     if (m.context) console.log("context :", m.context);
     if (m.meta && Object.keys(m.meta).length) console.log("meta    :", JSON.stringify(m.meta));
@@ -432,12 +469,35 @@ async function listInbox() {
   // the same as starting the work.
   console.log("-".repeat(60));
   console.log("");
-  console.log("Taking a task is a separate step — reading the inbox does not start the work.");
-  console.log("Without it the task stays 'delivered' and the planner sees an idle node.");
-  for (const m of messages) {
-    const id = m.task_id || m.id;
-    if (m.type !== "task") continue;
-    console.log(`  ${SCRIPT_NAME} working ${id} 0 --node ${alias}`);
+  const openTasks = messages.filter(
+    (m) => m.type === "task" && isOpen(taskStatus[m.task_id || m.id]),
+  );
+  const doneTasks = messages.filter(
+    (m) => m.type === "task" && !isOpen(taskStatus[m.task_id || m.id]),
+  );
+  const chat = messages.filter((m) => m.type !== "task");
+  if (openTasks.length) {
+    console.log("Taking a task is a separate step — reading the inbox does not start the work.");
+    console.log("Without it the task stays 'delivered' and the planner sees an idle node.");
+    for (const m of openTasks) {
+      const id = m.task_id || m.id;
+      console.log(`  ${SCRIPT_NAME} working ${id} 0 --node ${alias}`);
+    }
+  }
+  if (chat.length) {
+    console.log("");
+    console.log("Chat messages are not tasks: they have no task id and nothing to ack.");
+    console.log("Reply to the human with (this does not touch any task):");
+    for (const m of chat) {
+      console.log(`  ${SCRIPT_NAME} dm ${m.from_session} "<reply>" --node ${alias}`);
+    }
+  }
+  if (doneTasks.length) {
+    console.log("");
+    console.log(
+      `${doneTasks.length} row(s) below are FINISHED tasks (already closed on the hub) — ` +
+      "the hub keeps their inbox row until it is acked; nothing to do about them.",
+    );
   }
   // Remember what this node has seen, so a task that later disappears (taken
   // away, expired, retried) can be named instead of vanishing silently.
@@ -597,7 +657,23 @@ async function setState(state, progress) {
 async function replyTask(id, text, status, via) {
   if (!id || !text) die('usage: reply <task_id> "<text>" [replied|failed|cancelled]', 2);
   const t = await mcp("get_task", { task_id: id });
-  if (!t.ok || !t.task) die(`task ${id} not found`, 5);
+  if (!t.ok || !t.task) {
+    // It may be a chat message rather than a task: a message row has no
+    // task id, so neither `reply` nor `send_reply` can close it (the hub
+    // looks the id up in the tasks table and answers reply_task_not_found).
+    // The tool that reaches a human is send_desktop_message — use `dm`.
+    let hint = "";
+    try {
+      const inbox = await mcp("get_inbox", { alias, limit: 100, network_id });
+      const hit = (inbox.messages || []).find((m) => (m.task_id || m.id) === id || m.id === id);
+      if (hit && hit.type !== "task") {
+        hint =
+          ` — ${id} is a ${hit.type} in your inbox, not a task, so it has no task id to close. ` +
+          "Reply to it with: " + SCRIPT_NAME + " dm " + hit.from_session + ' "<text>"';
+      }
+    } catch {}
+    die(`task ${id} not found${hint}`, 5);
+  }
   if (TERMINAL.includes(t.task.status)) {
     die(`task ${id} is already ${t.task.status} — nothing to close`, 5);
   }
@@ -657,7 +733,51 @@ async function sayTo(target, text) {
   if (!target || !text) die('usage: say <alias> "<text>"', 2);
   const r = await mcp("send_message", { alias: target, message: text, network_id });
   console.log(JSON.stringify(r));
-  if (!r.ok) die(`send_message failed: ${r.error || "unknown"}`, 5);
+  if (!r.ok) {
+    // send_message targets a NODE (it needs a sessions row). A human
+    // ("admin") has none, so it answers alias_not_found — the human is
+    // reachable, but through a different tool. Say so, and point at `dm`.
+    if (r.error === "alias_not_found") {
+      die(
+        `send_message failed: alias_not_found — ${target} is not a node alias. ` +
+        "send_message only reaches nodes (they have a session row); a human user does not. " +
+        "To reach a human: " + SCRIPT_NAME + " dm " + target + ' "<text>"',
+        5,
+      );
+    }
+    die(`send_message failed: ${r.error || "unknown"}`, 5);
+  }
+}
+
+// A message in the inbox is a chat row, not a task: it has no task_id, so
+// `reply` (which resolves a task first) cannot close it and `send_reply`
+// cannot either (it looks the id up in the tasks table and answers
+// reply_task_not_found). The tool that DOES reach a human is
+// send_desktop_message: it addresses a user (to_username / to_user_id),
+// not a node alias, and it lands in that user's inbox.
+async function dmTo(target, text, title) {
+  if (!target || !text) die('usage: dm <username> "<text>" [--title "<title>"]', 2);
+  const args = { message: text, network_id };
+  if (title) args.title = title;
+  // A username reads better than a user_id; accept either and let the hub
+  // resolve it. send_desktop_message takes to_username and to_user_id.
+  if (target.startsWith("u_")) args.to_user_id = target;
+  else args.to_username = target;
+  const r = await mcp("send_desktop_message", args);
+  console.log(JSON.stringify(r));
+  if (!r.ok) {
+    die(
+      `send_desktop_message failed: ${r.error || "unknown"}` +
+      (r.error === "user_not_found" ? ` — no such user: ${target}` : ""),
+      5,
+    );
+  }
+  console.log(
+    `sent to ${target}` +
+    (r.delivered === false
+      ? ` (persisted, not delivered live: ${r.reason || "no live subscriber"} — it waits in the user's inbox)`
+      : ""),
+  );
 }
 
 function ageSeconds(stamp) {
@@ -711,6 +831,24 @@ async function check() {
     );
   }
   if (!open.length) console.log("  (none)");
+
+  // The inbox row count and the open-task count are different things, and
+  // the difference is worth naming: a finished task keeps its inbox row
+  // until it is acked, and a chat message is a row that was never a task.
+  // Without this the node looks like it has work it does not have.
+  const chatRows = pending.filter((m) => m.type !== "task");
+  const pendingTaskIds = pendingIds.filter((id) => open.some((t) => t.task_id === id));
+  const finishedRows = pending.length - chatRows.length - pendingTaskIds.length;
+  if (chatRows.length || finishedRows > 0) {
+    const bits = [];
+    if (chatRows.length) bits.push(`${chatRows.length} chat message(s)`);
+    if (finishedRows > 0) bits.push(`${finishedRows} finished task row(s) (already closed on the hub)`);
+    console.log(`  inbox rows that are NOT open tasks: ${bits.join(", ")}`);
+    for (const m of chatRows) {
+      console.log(`    - chat from ${m.from_session}: ${String(m.content || "").slice(0, 60).replace(/\s+/g, " ")}`);
+      console.log(`      reply with: ${SCRIPT_NAME} dm ${m.from_session} "<text>" --node ${alias}`);
+    }
+  }
 
   // Tasks this node saw and then lost: reassigned away, expired, or retried.
   // They vanish from the inbox silently, so without this list "the previous
@@ -833,6 +971,10 @@ async function main() {
     await replyTask(positional[0], positional[1], positional[2], via);
   } else if (MODE === "say") {
     await sayTo(ARGS[0], ARGS[1]);
+  } else if (MODE === "dm") {
+    // `dm <username> "<text>" [--title "<title>"]` — the title is a flag
+    // (parsed by the shell, so it never reaches ARGS).
+    await dmTo(ARGS[0], ARGS[1], DM_TITLE || process.env.ANET_MANUAL_DM_TITLE || "");
   } else if (MODE === "check") {
     await check();
   } else {
@@ -862,7 +1004,7 @@ cmd_start() {
   "ANET_MANUAL_INTERVAL=$INTERVAL" "ANET_MANUAL_HUB=$HUB_OVERRIDE" \
   "ANET_MANUAL_NETWORK=$NETWORK_OVERRIDE" "ANET_MANUAL_NODE=$NODE_NAME" \
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \
-  "ANET_MANUAL_REPLY_VIA=$REPLY_VIA" \
+  "ANET_MANUAL_REPLY_VIA=$REPLY_VIA" "ANET_MANUAL_DM_TITLE=$DM_TITLE" \
   "ANET_MANUAL_JSON=$JSON_OUT" \
     nohup "$JSBIN" "$CLIENT" watch >>"$LOGFILE" 2>&1 &
   echo $! >"$PIDFILE"
@@ -905,7 +1047,7 @@ cmd_run() {
   "ANET_MANUAL_INTERVAL=$INTERVAL" "ANET_MANUAL_HUB=$HUB_OVERRIDE" \
   "ANET_MANUAL_NETWORK=$NETWORK_OVERRIDE" "ANET_MANUAL_NODE=$NODE_NAME" \
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \
-  "ANET_MANUAL_REPLY_VIA=$REPLY_VIA" \
+  "ANET_MANUAL_REPLY_VIA=$REPLY_VIA" "ANET_MANUAL_DM_TITLE=$DM_TITLE" \
   "ANET_MANUAL_JSON=$JSON_OUT" \
     "$JSBIN" "$CLIENT" "$@"
 }
@@ -929,6 +1071,7 @@ case "$COMMAND" in
   state) cmd_run state "${ARGS[@]}" ;;
   reply) cmd_run reply "${ARGS[@]}" ;;
   say) cmd_run say "${ARGS[@]}" ;;
+  dm) cmd_run dm "${ARGS[@]}" ;;
   check) cmd_run check ;;
   ""|-h|--help|help) usage ;;
   *)

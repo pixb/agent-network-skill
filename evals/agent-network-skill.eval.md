@@ -16,6 +16,7 @@ it a pass.
 | `case-5` (`reassigned-away`) | the task is reassigned to somebody else; `check` names it as **left behind** instead of letting it vanish silently |
 | `case-6` (`two-tasks`) | two tasks at once: the second is **refused** (one node, one session slot) and `check` shows which task holds the slot |
 | `case-7` (`skipped-working`) | the task is closed **without** `working` — the hub accepts the jump to `replied`, and `reply` **warns** that the run was invisible (no `acked`, no `running`) |
+| `case-8` (`chat-and-finished`) | the inbox holds a **chat message** (no task id) and a **finished task** (its row outlives the task) — `inbox` tells the two apart, `reply`/`say` point at `dm`, and `dm` reaches the human |
 
 `case-3` is the holdout (`split: "test"`): it is never fed to an optimization loop.
 
@@ -70,7 +71,8 @@ say-so):
     {"id": "case-4", "input": "golden/case-4/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-5", "input": "golden/case-5/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-6", "input": "golden/case-6/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},
-    {"id": "case-7", "input": "golden/case-7/input.json", "expected": "golden/case-7/expected.json", "split": "val", "expected_status": "pending-first-green"}
+    {"id": "case-7", "input": "golden/case-7/input.json", "expected": "golden/case-7/expected.json", "split": "val", "expected_status": "pending-first-green"},
+    {"id": "case-8", "input": "golden/case-8/input.json", "expected": "golden/case-8/expected.json", "split": "val", "expected_status": "pending-first-green"}
   ]
 }
 ```

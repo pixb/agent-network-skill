@@ -12,6 +12,11 @@
 #   skipped-working  register, dispatch, reply (no working)   -> task ends replied,
 #                                                             and reply warns that
 #                                                             the run was invisible
+#   chat-and-finished register, dispatch, a chat message from
+#                    a human, a reply that leaves the task's
+#                    inbox row behind                 -> inbox tells the two
+#                                                             kinds apart, and
+#                                                             `dm` reaches the human
 #   terminal-refused register, dispatch, ack, working, reply,
 #                    then a second reply                     -> the second reply is refused
 #
@@ -287,6 +292,106 @@ if [ "$SCENARIO" = "two-tasks" ]; then
   check "terminal_task_refuses_second_reply" false
   check "hijacked_task_is_refused" false
   check "vanished_task_is_named" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── chat-and-finished: a message row and a finished task row in the inbox ──
+# Two inbox kinds that are NOT work, and the operator must be able to tell
+# them apart:
+#   · a chat row (type=message) has no task id, so it cannot be answered with
+#     `reply`/`send_reply` (both resolve the id against the tasks table) —
+#     it needs `dm <username>`, which reaches a human;
+#   · a task that was closed without being acked keeps its inbox row on the
+#     hub forever, so a finished task shows up next to real work.
+if [ "$SCENARIO" = "chat-and-finished" ]; then
+  # A human sends the node a chat message.
+  python3 - "$HUB" "$UTOK" "$NET" <<'PY' >"$WORK/msgid"
+import json, sys, urllib.request
+hub, utok, net = sys.argv[1:4]
+req = urllib.request.Request(hub + "/mcp", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json",
+             "Accept": "application/json, text/event-stream"},
+    data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "send_message", "arguments": {
+            "alias": "scenario-node", "message": "方案确认一下", "network_id": net}}}).encode())
+raw = urllib.request.urlopen(req).read().decode()
+frames = [l[5:].strip() for l in raw.split("\n") if l.startswith("data:")]
+msg = json.loads("".join(frames) if frames else raw)
+print(json.loads(msg["result"]["content"][0]["text"]).get("message_id", ""))
+PY
+  MSG_ID="$(cat "$WORK/msgid")"
+  [ -n "$MSG_ID" ] || fail "could not send a chat message to the node"
+
+  # A task that is closed WITHOUT being acked keeps its inbox row on the hub.
+  run reply "$TASK_ID" "the work is finished" >"$WORK/reply.log" 2>&1 \
+    || fail "reply failed: $(tail -1 "$WORK/reply.log")"
+  record_status "$TASK_ID"
+
+  # The inbox must label both kinds: the chat row and the finished task.
+  run inbox >"$WORK/inbox.log" 2>&1 || fail "inbox failed"
+  grep -q "type    : message" "$WORK/inbox.log" \
+    || fail "inbox did not show the chat row: $(tail -5 "$WORK/inbox.log")"
+  grep -q "FINISHED" "$WORK/inbox.log" \
+    || fail "inbox did not mark the finished task: $(tail -5 "$WORK/inbox.log")"
+  # …and must not offer `working` for a task that is already closed.
+  if grep -q "working $TASK_ID" "$WORK/inbox.log"; then
+    fail "inbox offered to start a task that is already finished: $(tail -8 "$WORK/inbox.log")"
+  fi
+  # …but must point at `dm` for the chat row.
+  grep -q "dm scenario-user" "$WORK/inbox.log" \
+    || fail "inbox did not point at dm for the chat row: $(tail -8 "$WORK/inbox.log")"
+  record_verdict "inbox separates chat and finished rows"
+
+  # `reply` on a message id must say what to use instead, not just fail.
+  if run reply "$MSG_ID" "谢谢" >"$WORK/reply-msg.log" 2>&1; then
+    fail "replying to a chat message should have been refused"
+  fi
+  grep -q "is a message in your inbox" "$WORK/reply-msg.log" \
+    || fail "reply did not explain that a message has no task id: $(tail -2 "$WORK/reply-msg.log")"
+  grep -q "dm scenario-user" "$WORK/reply-msg.log" \
+    || fail "reply did not point at dm: $(tail -2 "$WORK/reply-msg.log")"
+
+  # `say` cannot reach a human (no sessions row) — it must say so and point
+  # at `dm` rather than leaving the operator with a bare alias_not_found.
+  if run say scenario-user "你好" >"$WORK/say.log" 2>&1; then
+    fail "say to a human should have been refused"
+  fi
+  grep -q "not a node alias" "$WORK/say.log" \
+    || fail "say did not explain that a human is not a node: $(tail -2 "$WORK/say.log")"
+  grep -q "dm scenario-user" "$WORK/say.log" \
+    || fail "say did not point at dm: $(tail -2 "$WORK/say.log")"
+
+  # `dm` is the command that actually reaches the human.
+  run dm scenario-user "收到，方案如下" >"$WORK/dm.log" 2>&1 \
+    || fail "dm failed: $(tail -2 "$WORK/dm.log")"
+  grep -q "sent to scenario-user" "$WORK/dm.log" \
+    || fail "dm did not report the send: $(tail -2 "$WORK/dm.log")"
+
+  # The human really received it.
+  USER_INBOX=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/messages?scope=user&since=2020-01-01%2000:00:00" \
+    | python3 -c "import json,sys;print(len(json.load(sys.stdin).get('messages',[])))")
+  [ "${USER_INBOX:-0}" -ge 1 ] || fail "the human never received the dm"
+
+  # check must count the chat row separately from the open tasks.
+  run check >"$WORK/check.log" 2>&1 || fail "check failed"
+  grep -q "chat message" "$WORK/check.log" \
+    || fail "check did not report the chat row: $(tail -8 "$WORK/check.log")"
+
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "replied" ] \
+    || fail "the task did not reach replied (it is $FINAL_STATUS)"
+  check "chat_row_is_labelled" true
+  check "finished_task_row_is_labelled" true
+  check "chat_row_points_at_dm" true
+  check "dm_reaches_the_human" true
+  check "task_reaches_replied" true
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
   write_result true
   echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
   exit 0

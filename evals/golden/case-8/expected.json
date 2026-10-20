@@ -1,0 +1,26 @@
+{
+  "scenario": "chat-and-finished",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:replied"
+  ],
+  "verdicts": [
+    "inbox separates chat and finished rows"
+  ],
+  "checks": {
+    "chat_row_is_labelled": true,
+    "finished_task_row_is_labelled": true,
+    "chat_row_points_at_dm": true,
+    "dm_reaches_the_human": true,
+    "task_reaches_replied": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

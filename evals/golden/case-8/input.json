@@ -1,0 +1,4 @@
+{
+  "scenario": "chat-and-finished",
+  "hub_source": "/vol1/1000/docker/nec8-docker/agent-network/server"
+}
