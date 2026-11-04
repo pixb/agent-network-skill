@@ -1,0 +1,27 @@
+{
+  "scenario": "ask-by-send-reply-visible",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "asked-via-send-reply",
+    "status:replied"
+  ],
+  "verdicts": [],
+  "checks": {
+    "send_reply_visible_in_alias_messages": true,
+    "send_reply_visible_in_task_result": true,
+    "send_reply_absent_from_user_scope": true,
+    "task_reaches_replied": true,
+    "terminal_task_refuses_second_reply": false,
+    "dm_visible_in_user_scope": false,
+    "dm_absent_from_alias_messages": false,
+    "ask_keeps_task_dispatchable": false,
+    "stuck_task_is_diagnosed": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

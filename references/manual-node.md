@@ -234,24 +234,32 @@ closed task never comes back: the next round is a new task id.
 
 ## Where a message becomes visible
 
-"Visible" means *visible in the Dashboard*. The Tasks page reads `tasks`, the Messages page reads
-`inbox` (via `?alias=`), and **the Dashboard has no page for `user_inbox`** — the Next.js app has no
-`/dm` route. That is why a `dm` conversation between a manual node and the person running the
-control room is invisible on the Dashboard while the data sits safely in the hub.
+"Visible" means *visible in the Dashboard*. Three pages read three different tables: Tasks reads
+`tasks` (with a `completions` fallback), Messages reads `inbox` via `?alias=<alias>`, and
+`/messages/inbox` reads `user_inbox` via `?scope=user`. The inbox page is the reading surface that
+was missing: `user_inbox` already held every `dm` a node sent the control room (production
+`net_b91c0d535346`: 42 rows for `admin`, all unacked) and no page read it.
 
 | channel | tool | lands in | Dashboard |
 |---|---|---|---|
-| `reply --via send_reply` | `send_reply` | `inbox(session_name=<dispatcher username>, type='reply')` | **Messages / ChatPanel** |
-| `reply` (default) | `report_completion` | `completions` + `tasks.result` | Tasks page detail only — not the message stream |
-| `dm <username>` | `send_desktop_message` | `user_inbox(kind='agent_message')` | **nothing** (desktop app / `GET /api/messages?scope=user`) |
+| `reply --via send_reply` | `send_reply` | `inbox(session_name=<派单人用户名>, type='reply')` + `tasks.result` | **Messages 页**（`case-11`） |
+| `reply` (default) | `report_completion` | `completions` + `tasks.result` | **只有 Tasks 页** — Messages 页与收件箱都没有，人也没有未读（`case-10`） |
+| `dm <username>` | `send_desktop_message` | `user_inbox(kind='agent_message')` | **`/messages/inbox`**（`case-9`） |
 | `say <alias>` | `send_message` | `inbox(session_name=<node alias>)` | Messages |
+
+实测过的三条路均来自一次性 hub（`tests/manual_node_scenario.sh` 的 `case-9/10/11`）：
+`report_completion` 不写任何人能读到的行，`send_reply` 写「派单人别名」的 inbox 行，
+`dm` 写 user_inbox —— 所以「发出去了但 Dash 上看不见」从来不是丢消息，是落对了表、
+而那一屏没人读。
 
 So the deliverable and the question take different channels on purpose:
 
 - **the answer is the work** → `reply --via send_reply`, and the dispatcher reads it in the
   message stream (the round ends here);
 - **you need an answer to keep working** → `state blocked` + `dm`, and the task stays `running`;
-  the question text is then *not* on the Dashboard, by design;
+  the question shows up in the manager's inbox page as an unread row;
+- **pure close-out** (nobody needs to read the text) → `reply` without `--via send_reply`;
+  it is the only shape that leaves the control room with no visible message at all;
 - **node-to-node chatter** → `say`.
 
 Read the reply side as the user you dispatched as: `GET /api/messages?alias=<username>&network_id=<id>`
@@ -305,7 +313,8 @@ from a node token, and the message lands in the user's inbox.
 
 `dm` reports `persisted, not delivered live: no live subscriber` when nobody is watching the
 dashboard — that is normal, and it means the message is **waiting in the user's inbox**, not
-lost. It is not on the Dashboard: see "Where a message becomes visible".
+lost. It shows up on the Dashboard as an unread row at `/messages/inbox`: see
+"Where a message becomes visible".
 
 ### Finished tasks keep their inbox row
 

@@ -17,6 +17,9 @@ it a pass.
 | `case-6` (`two-tasks`) | two tasks at once: the second is **refused** (one node, one session slot) and `check` shows which task holds the slot |
 | `case-7` (`skipped-working`) | the task is closed **without** `working` — the hub accepts the jump to `replied`, and `reply` **warns** that the run was invisible (no `acked`, no `running`) |
 | `case-8` (`chat-and-finished`) | the inbox holds a **chat message** (no task id) and a **finished task** (its row outlives the task) — `inbox` tells the two apart, `reply`/`say` point at `dm`, and `dm` reaches the human |
+| `case-9` (`dm-visible-to-manager`) | a mid-task question sent with `dm` is readable in the manager's **own inbox** (`?scope=user`), is **not** in the alias messages the Messages page reads, leaves the task `running`, and the follow-up task still arrives — the asking channel stays open |
+| `case-10` (`ask-by-reply-strands`) | the same question written as a plain `reply` (default = `report_completion`) lands only in `completions` + `tasks.result`: absent from the alias messages, absent from the inbox, **no unread for the human**, and the task is terminal so a second reply is refused |
+| `case-11` (`ask-by-send-reply-visible`) | one flag apart (`--via send_reply`): the text **is** in the alias messages the Messages page reads (and in the task result), and the task is still closed — which is why a question must not be written as a reply |
 
 `case-3` is the holdout (`split: "test"`): it is never fed to an optimization loop.
 
@@ -72,7 +75,10 @@ say-so):
     {"id": "case-5", "input": "golden/case-5/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-6", "input": "golden/case-6/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-7", "input": "golden/case-7/input.json", "expected": "golden/case-7/expected.json", "split": "val", "expected_status": "pending-first-green"},
-    {"id": "case-8", "input": "golden/case-8/input.json", "expected": "golden/case-8/expected.json", "split": "val", "expected_status": "pending-first-green"}
+    {"id": "case-8", "input": "golden/case-8/input.json", "expected": "golden/case-8/expected.json", "split": "val", "expected_status": "pending-first-green"},
+    {"id": "case-9", "input": "golden/case-9/input.json", "expected": "golden/case-9/expected.json", "split": "val", "expected_status": "pending-first-green"},
+    {"id": "case-10", "input": "golden/case-10/input.json", "expected": "golden/case-10/expected.json", "split": "val", "expected_status": "pending-first-green"},
+    {"id": "case-11", "input": "golden/case-11/input.json", "expected": "golden/case-11/expected.json", "split": "val", "expected_status": "pending-first-green"}
   ]
 }
 ```

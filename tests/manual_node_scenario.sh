@@ -251,6 +251,132 @@ PY
   exit 0
 fi
 
+# ── dm-visible-to-manager: 节点提问走 dm，经理在收件箱里看得见 ───────────
+# 钉的是本仓约定的那条路：中途提问必须用 send_desktop_message（anet_manual_node.sh
+# 的 `dm`），它是唯一能到人手里的消息工具；而它落的是 user_inbox，只有
+# `?scope=user` 返回 —— Messages 页读的 `?alias=` 里没有它。两条都要钉住：
+# 只钉「scope=user 看得见」，将来有人把收件箱页改成读 alias 消息，测试不会红。
+if [ "$SCENARIO" = "dm-visible-to-manager" ]; then
+  run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
+  record_status "$TASK_ID"
+  run working "$TASK_ID" "scenario: started the first line" >/dev/null 2>&1 || fail "working failed"
+  QUESTION="scenario question: which output directory should 033 use?"
+  run dm scenario-user "$QUESTION" >"$WORK/dm.log" 2>&1 \
+    || fail "dm failed: $(tail -1 "$WORK/dm.log")"
+  record "asked"
+  record_status "$TASK_ID"
+
+  USER_ROWS=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/messages?scope=user&network_id=$NET")
+  check "dm_visible_in_user_scope" "$(echo "$USER_ROWS" | grep -qF "$QUESTION" && echo true || echo false)"
+  ALIAS_ROWS=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/messages?alias=scenario-user&network_id=$NET")
+  check "dm_absent_from_alias_messages" "$(echo "$ALIAS_ROWS" | grep -qF "$QUESTION" && echo false || echo true)"
+
+  # 提问不是交付：任务必须还在跑，经理才有得可派。
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "running" ] \
+    || fail "asking must leave the task running, got $FINAL_STATUS"
+  FOLLOW_ID="$(dispatch "scenario follow-up: use /work/out")"
+  record "followup-dispatched"
+  run inbox >"$WORK/inbox.log" 2>&1 || fail "inbox failed"
+  grep -q "$FOLLOW_ID" "$WORK/inbox.log" \
+    || fail "the follow-up never reached the node's inbox: $(tail -3 "$WORK/inbox.log")"
+  # 跟进任务是**另一条**任务：记成 other，不混进主任务的状态轨迹（协议检查只读
+  # 一个任务的路径，两条任务拼起来会得到一条不存在的路径）。
+  record_other "$FOLLOW_ID"
+
+  check "ask_keeps_task_dispatchable" true
+  check "task_reaches_replied" false
+  check "terminal_task_refuses_second_reply" false
+  check "stuck_task_is_diagnosed" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── ask-by-reply-strands: 把提问写成 reply，任务当场终结 ──────────────────
+if [ "$SCENARIO" = "ask-by-reply-strands" ]; then
+  run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
+  run working "$TASK_ID" "scenario: need a decision" >/dev/null 2>&1 || fail "working failed"
+  QUESTION="scenario question asked as a reply: which output directory?"
+  run reply "$TASK_ID" "$QUESTION" >/dev/null 2>&1 || fail "reply failed"
+  record "asked-as-reply"
+  record_status "$TASK_ID"
+
+  # 它在 Tasks 页的读路径里（作为任务结果），不在 Messages 页的读路径里，也不在
+  # 收件箱页的读路径里。三条一起钉：reply 落 completions + 任务的 result（实测），
+  # inbox / user_inbox 一行都不会多。哪条读路径变了，测试都会红。
+  check "reply_visible_in_task_result" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/tasks?network_id=$NET&limit=50" | grep -qF "$QUESTION" && echo true || echo false)"
+  check "reply_absent_from_alias_messages" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/messages?alias=scenario-user&network_id=$NET" | grep -qF "$QUESTION" && echo false || echo true)"
+  check "reply_absent_from_user_scope" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/messages?scope=user&network_id=$NET" | grep -qF "$QUESTION" && echo false || echo true)"
+
+  # 代价一：任务终结，这条对话没有「下一轮」。
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "replied" ] \
+    || fail "a reply must close the task, got $FINAL_STATUS"
+  if run reply "$TASK_ID" "scenario: follow-up question" >"$WORK/second-reply.log" 2>&1; then
+    fail "a terminal task accepted a second reply"
+  fi
+  record_verdict "second reply refused: $(tail -1 "$WORK/second-reply.log" | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g')"
+
+  # 代价二：没有未读。人在自己的收件箱里看不到有一条问题在等回答（实测
+  # user_inbox 为空），所以问题只能靠人主动去看任务详情才会被发现。
+  check "question_creates_no_unread_for_the_human" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/messages?scope=user&unacked=1&network_id=$NET" | grep -qF "$QUESTION" && echo false || echo true)"
+  check "terminal_task_refuses_second_reply" true
+  check "task_reaches_replied" true
+  check "dm_visible_in_user_scope" false
+  check "dm_absent_from_alias_messages" false
+  check "ask_keeps_task_dispatchable" false
+  check "stuck_task_is_diagnosed" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── ask-by-send-reply-visible: 写成 send_reply 的问题进得了别名收件箱 ──────
+# 与 ask-by-reply-strands 只差一个参数：`--via send_reply`。两个 case 一起钉出
+# 两条交付通道的真实落点（reply 默认走 report_completion，只进 completions）。
+if [ "$SCENARIO" = "ask-by-send-reply-visible" ]; then
+  run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
+  run working "$TASK_ID" "scenario: need a decision" >/dev/null 2>&1 || fail "working failed"
+  QUESTION="scenario question sent via send_reply: which output directory?"
+  run reply "$TASK_ID" "$QUESTION" --via send_reply >/dev/null 2>&1 || fail "send_reply failed"
+  record "asked-via-send-reply"
+  record_status "$TASK_ID"
+
+  check "send_reply_visible_in_alias_messages" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/messages?alias=scenario-user&network_id=$NET" | grep -qF "$QUESTION" && echo true || echo false)"
+  check "send_reply_visible_in_task_result" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/tasks?network_id=$NET&limit=50" | grep -qF "$QUESTION" && echo true || echo false)"
+  check "send_reply_absent_from_user_scope" "$(curl -s -H "Authorization: Bearer $UTOK" \
+    "$HUB/api/messages?scope=user&network_id=$NET" | grep -qF "$QUESTION" && echo false || echo true)"
+
+  # 它仍然是终态：send_reply 把任务关到 replied，所以「问一句」不能拿它当提问工具。
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "replied" ] || fail "send_reply must close the task, got $FINAL_STATUS"
+  check "terminal_task_refuses_second_reply" false
+  check "task_reaches_replied" true
+  check "dm_visible_in_user_scope" false
+  check "dm_absent_from_alias_messages" false
+  check "ask_keeps_task_dispatchable" false
+  check "stuck_task_is_diagnosed" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
 # ── two-tasks: one node, one slot, no parallelism ─────────────────────────
 if [ "$SCENARIO" = "two-tasks" ]; then
   SECOND_ID="$(dispatch "a second task that must wait for the slot")"

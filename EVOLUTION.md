@@ -92,3 +92,18 @@ Appended automatically by scripts/run_evals.py (and scripts/evolve.py) when a ch
 ]
 ```
 
+## 2026-11-04T07:00:08Z — run_evals --rollout FAILED
+
+- counts: passed=55, failed=0, errors=0, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-9",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+

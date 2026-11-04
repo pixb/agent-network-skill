@@ -368,7 +368,8 @@ machine that owns the node. It is the whole protocol, made explicit:
 ```
 
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
-why the task body is fetched from the hub instead of retyped.
+why the task body is fetched from the hub instead of retyped. Read `references/ttl-and-expiry.md`
+for how long a dispatched task actually lives.
 
 ### 7.0 Who the manager is, and where each message must go
 
@@ -389,21 +390,26 @@ no implicit network, so every read names one (`GET /api/messages?alias=admin&net
 the hub answers `"network_id required (utok has no implicit network; pass ?network_id=<id>)"`).
 
 **Which channel to use, and where the message lands.** "Visible" below means *visible in the
-Dashboard*: the Tasks page reads `tasks`, the Messages page reads `inbox` via `?alias=`, and
-**the Dashboard has no page for `user_inbox`** (there is no `/dm` route in the Next.js app).
+Dashboard*: the Tasks page reads `tasks` (with a `completions` fallback), the Messages page reads
+`inbox` via `?alias=<alias>`, and the inbox page `/messages/inbox` reads `user_inbox` via
+`?scope=user`. All three were measured on a throwaway hub (`evals/golden/case-9/10/11`), not
+inferred — the two reply tools land in **different** tables, and that is the single most common
+source of "我发了，Dash 上看不见".
 
 | you want to | use | lands in | Dashboard sees it? |
 |---|---|---|---|
-| hand over the finished work | `reply <task_id> … --via send_reply` | `inbox(session_name=<dispatcher username>)` | **yes** — Messages / ChatPanel |
-| finish and close the task only | `reply <task_id> … --via completion` (`report_completion`) | `completions` + `tasks.result` | Tasks page only — it is **not** in the message stream |
-| ask the human a question mid-task | `state blocked` + `dm <username>` | `user_inbox(kind=agent_message)` | **no** — desktop app only |
-| chat with another node | `say <alias>` | `inbox(session_name=<node alias>)` | yes |
-| chat with a human | `dm <username>` | `user_inbox` | **no** |
+| hand over the finished work | `reply <task_id> … --via send_reply` | `inbox(session_name=<派单人用户名>)` + `tasks.result` | **yes** — Messages 页（case-11） |
+| finish and close the task only | `reply <task_id> …` (default = `report_completion`) | `completions` + `tasks.result` | Tasks 页只此一处 — Messages 页与收件箱都**看不见**，人也没有未读（case-10） |
+| ask the human a question mid-task | `state blocked` + `dm <username>` | `user_inbox(kind=agent_message)` | **yes** — `/messages/inbox`（case-9） |
+| chat with another node | `say <alias>` | `inbox(session_name=<node alias>)` | yes — Messages 页 |
+| chat with a human | `dm <username>` | `user_inbox` | yes — `/messages/inbox` |
 
-> **`dm` is invisible in the Dashboard, by construction, and it is not a delivery failure.**
-> It is the only channel that is not on the Dashboard. Everything that has to be *seen by the
-> person running the control room* goes through a task: answer with `reply --via send_reply`.
-> Use `dm` for reminders and side chatter, never for a deliverable.
+> **`dm` is the only channel that reaches a person's unread count; `report_completion` is the only
+> one that is invisible outside the Tasks page.** Both facts are the reason a control room can sit
+> for hours on a question nobody answered: `report_completion` writes no inbox row for the
+> dispatcher and no user_inbox row, so nothing anywhere shows the person that an answer arrived.
+> Use `--via send_reply` when the answer must be seen in the message stream, `dm` when a person
+> has to be *notified*.
 
 **`send_reply` is terminal.** It closes the task to `replied`, and `replied` is not in the set
 `retry_task` accepts (`failed` / `expired` / `cancelled`) — so asking a question as a reply ends
@@ -515,6 +521,16 @@ session status:
   retried)
 
 ## Gotchas
+
+- **Dispatching without `ttl_seconds` promises one hour.** `send_task` defaults to
+  `ttl_seconds = 3600` (max 86400), and `retry_task` re-arms only `+1 hour` — so long work
+  needs the TTL written explicitly, and a retried long job is really a new task. Expired
+  tasks notify into `user_inbox` (`/messages/inbox`), never into the message stream.
+  See `references/ttl-and-expiry.md`.
+- **`report_completion` creates nothing a person can see as a message.** It writes
+  `completions` + `tasks.result` only — the Messages page and the inbox page both stay empty,
+  and the dispatcher gets no unread badge. That is the usual cause of "我发了，Dash 上看不见".
+  Use `--via send_reply` when the text must be read, `dm` when a person must be notified.
 
 - **Planner**: stop after dispatching — no waiting, no polling; ask first when a task is vague.
 - **Worker**: `get_inbox` → `ack` → `working` → `completion`, once per task; make `result` concrete

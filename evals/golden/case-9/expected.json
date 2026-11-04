@@ -1,0 +1,27 @@
+{
+  "scenario": "dm-visible-to-manager",
+  "ok": true,
+  "final_status": "running",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:acked",
+    "asked",
+    "status:running",
+    "followup-dispatched",
+    "other:delivered"
+  ],
+  "verdicts": [],
+  "checks": {
+    "dm_visible_in_user_scope": true,
+    "dm_absent_from_alias_messages": true,
+    "ask_keeps_task_dispatchable": true,
+    "task_reaches_replied": false,
+    "terminal_task_refuses_second_reply": false,
+    "stuck_task_is_diagnosed": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}
