@@ -159,6 +159,13 @@ The tool set is whatever the running hub returns from `tools/list`.
 Tools: `send_task` `get_task` `list_tasks` `cancel_task` `retry_task` `reassign_task`
 `get_all_status` `broadcast` `send_message` (the pool path is in §6).
 
+**The control room is a user account, and it does not need a node.** Dispatch runs on a user
+token, so every task row carries `from_name = <your username>`; a user token is refused by
+`report_status` (`network_token_required`), which is the tool that creates a session row — there is
+nothing for a control room to run, and nothing to dispatch to. A control-room node is only needed
+when the planner is an **agent** that must heartbeat, be dispatched to, or subscribe to SSE; a human
+with a dashboard is not that. See §7.0 for the channels and where each one lands.
+
 1. **Confirm connection and token**: MCP is connected (`tools/list` shows the commhub tools); run
    `anet whoami` when in doubt.
 2. **Split the work**: every task must be self-contained (background + what to do + completion
@@ -303,6 +310,26 @@ symlink), so mounting it at `.agents/skills/<name>` is enough for project-level 
 opencode and friends to find it. To update: `git submodule update --remote
 .agents/skills/agent-network-skill` and commit.
 
+**One network per project.** The unit that separates projects on a hub is the network, not the
+directory, and every identity rule is network-scoped: alias uniqueness
+(`resolveNodeIdForAlias(nodes WHERE alias AND network_id)`, `canonicalAliasExists(networkId, alias)`),
+`clone_node` → `alias_taken`, `createNetworkTokenForNode` → `cross_network_node` / `node_owner_mismatch`.
+Consequences that are easy to get wrong:
+
+- **Node aliases carry machine + project** (`200-pix-auto-video-manual-doubao`). Two projects that
+  share a network and reuse a name collide, and the second registration is refused.
+- **A user token has no implicit network.** Every REST read names one: `?network_id=<id>` on
+  `/api/messages`, `/api/tasks`, `/api/status`; the hub answers `"network_id required (utok has no
+  implicit network; pass ?network_id=<id>)"` when you forget. The CLI takes `--network`.
+- **The manager's channels are per network**: `inbox(session_name=<username>, network_id=…)` for
+  replies to tasks you dispatched, and one `user_inbox` (`?scope=user`) per network. Unread rows
+  accumulate per network and never expire on their own — ack them (production measured 354 unacked
+  rows in one network).
+- **Keeping projects in one shared network is a visibility decision, not a convenience.** A network
+  with `agent_access: all` lets every worker in it see and message every other worker, and task
+  timelines are shared; if project A's prompts, artifacts and paths must not be visible to project
+  B's workers, that is a separate network.
+
 ## 6. Requirement pool mode (hub ≥ 0.9.0-preview.67)
 
 "Public" tasks that name no worker use the requirement-pool tools (`requirements_*`) and need hub
@@ -343,7 +370,52 @@ machine that owns the node. It is the whole protocol, made explicit:
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
 why the task body is fetched from the hub instead of retyped.
 
-### 7.0 Two kinds of inbox row: tasks and chat
+### 7.0 Who the manager is, and where each message must go
+
+**The manager is a user, not a node, and that is the normal shape — not a workaround.**
+Dispatch is done with a user token, so every task row carries `from_name = <username>`
+(production `net_b91c0d535346`: 200 most recent tasks, `from_name` is `admin` in 200 of them).
+A manager account needs no node: `report_status` — the heartbeat that makes a node exist —
+**refuses user tokens** (`tools.ts` `network_token_required`), so there is nothing for a human
+account to run, and a human account has no `sessions` row to be dispatched to.
+
+One manager can drive any number of projects. The unit that separates projects is the
+**network**, not the directory: alias uniqueness is checked per network
+(`resolveNodeIdForAlias(nodes WHERE alias AND network_id)`, `canonicalAliasExists(networkId, alias)`,
+`clone_node` → `alias_taken`, `createNetworkTokenForNode` → `cross_network_node` / `node_owner_mismatch`).
+So the convention is **one network per project**, and a node alias carries machine + project
+(`200-pix-auto-video-manual-doubao`). The manager's own channels are per network: a user token has
+no implicit network, so every read names one (`GET /api/messages?alias=admin&network_id=…`, and
+the hub answers `"network_id required (utok has no implicit network; pass ?network_id=<id>)"`).
+
+**Which channel to use, and where the message lands.** "Visible" below means *visible in the
+Dashboard*: the Tasks page reads `tasks`, the Messages page reads `inbox` via `?alias=`, and
+**the Dashboard has no page for `user_inbox`** (there is no `/dm` route in the Next.js app).
+
+| you want to | use | lands in | Dashboard sees it? |
+|---|---|---|---|
+| hand over the finished work | `reply <task_id> … --via send_reply` | `inbox(session_name=<dispatcher username>)` | **yes** — Messages / ChatPanel |
+| finish and close the task only | `reply <task_id> … --via completion` (`report_completion`) | `completions` + `tasks.result` | Tasks page only — it is **not** in the message stream |
+| ask the human a question mid-task | `state blocked` + `dm <username>` | `user_inbox(kind=agent_message)` | **no** — desktop app only |
+| chat with another node | `say <alias>` | `inbox(session_name=<node alias>)` | yes |
+| chat with a human | `dm <username>` | `user_inbox` | **no** |
+
+> **`dm` is invisible in the Dashboard, by construction, and it is not a delivery failure.**
+> It is the only channel that is not on the Dashboard. Everything that has to be *seen by the
+> person running the control room* goes through a task: answer with `reply --via send_reply`.
+> Use `dm` for reminders and side chatter, never for a deliverable.
+
+**`send_reply` is terminal.** It closes the task to `replied`, and `replied` is not in the set
+`retry_task` accepts (`failed` / `expired` / `cancelled`) — so asking a question as a reply ends
+the round, and the next round is a **new task**. Ask mid-task with `state blocked` + `dm` and keep
+the task `running`; answer with `reply` when the answer *is* the deliverable.
+
+A dashboard card that labels a manual node with the login username ("admin") is a **frontend
+fallback**, not a hub identity: `GET /api/status?alias=admin` returns no rows, `GET /api/nodes?alias=admin`
+returns `count: 0`, and every `nodes.owner_user_id` is null. Do not dispatch to that label; dispatch
+to the node's real alias.
+
+### 7.1 Two kinds of inbox row: tasks and chat
 
 `get_inbox` returns **inbox rows**, and there are two kinds, and they need different tools:
 
@@ -365,7 +437,7 @@ user's inbox).
 `inbox` and `check` both label every row, so a finished task is never mistaken for work: the
 hub keeps a closed task's inbox row until it is acked, and a chat row was never a task at all.
 
-### 7.1 The one step you must not skip: `working`
+### 7.2 The one step you must not skip: `working`
 
 **An automatic node's runtime sends `report_status("working")` by itself** — the agent-node
 process does it when a turn starts, and keeps re-sending it on the heartbeat
@@ -397,7 +469,7 @@ So a manual node that reads the inbox and then works without `working` spends th
 means `working` was skipped. The warning does not block the reply — the work really is done —
 but it is the only signal you get that the run was invisible.
 
-### 7.2 What the hub should look like once you start
+### 7.3 What the hub should look like once you start
 
 Three independent facts have to line up; a heartbeat moves **none** of them.
 

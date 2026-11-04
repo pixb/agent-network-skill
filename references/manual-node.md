@@ -225,6 +225,40 @@ the script never passes an alias of its own.
 `reply` also accepts `failed` or `cancelled` as the outcome, and uses `send_reply` for
 those automatically, because `report_completion` can only record success.
 
+**Both ways are terminal, and the target is derived, never typed.** The reply's recipient is
+the original task's `from_name` — when a person dispatched the task from the dashboard, that is
+**their username**, and the hub writes the row without requiring the recipient to have a session
+row (`assertNodeActive` looks at the `nodes` table and lets an unknown alias pass). And
+`replied` is not in the set `retry_task` accepts (`failed` / `expired` / `cancelled`), so a
+closed task never comes back: the next round is a new task id.
+
+## Where a message becomes visible
+
+"Visible" means *visible in the Dashboard*. The Tasks page reads `tasks`, the Messages page reads
+`inbox` (via `?alias=`), and **the Dashboard has no page for `user_inbox`** — the Next.js app has no
+`/dm` route. That is why a `dm` conversation between a manual node and the person running the
+control room is invisible on the Dashboard while the data sits safely in the hub.
+
+| channel | tool | lands in | Dashboard |
+|---|---|---|---|
+| `reply --via send_reply` | `send_reply` | `inbox(session_name=<dispatcher username>, type='reply')` | **Messages / ChatPanel** |
+| `reply` (default) | `report_completion` | `completions` + `tasks.result` | Tasks page detail only — not the message stream |
+| `dm <username>` | `send_desktop_message` | `user_inbox(kind='agent_message')` | **nothing** (desktop app / `GET /api/messages?scope=user`) |
+| `say <alias>` | `send_message` | `inbox(session_name=<node alias>)` | Messages |
+
+So the deliverable and the question take different channels on purpose:
+
+- **the answer is the work** → `reply --via send_reply`, and the dispatcher reads it in the
+  message stream (the round ends here);
+- **you need an answer to keep working** → `state blocked` + `dm`, and the task stays `running`;
+  the question text is then *not* on the Dashboard, by design;
+- **node-to-node chatter** → `say`.
+
+Read the reply side as the user you dispatched as: `GET /api/messages?alias=<username>&network_id=<id>`
+(production, 2026-11-04: 5 reply rows addressed to `admin` in that network, 354 unacked rows in the
+same channel), and the `dm` side with `GET /api/messages?scope=user&network_id=<id>` (41 rows: 24
+`task_expired`, 9 `task_orphan_suspected`, 8 `agent_message`, 0 `human_dm`).
+
 ## Reporting progress without closing
 
 `state` sets the session state and the heartbeat keeps re-reporting it:
@@ -271,7 +305,7 @@ from a node token, and the message lands in the user's inbox.
 
 `dm` reports `persisted, not delivered live: no live subscriber` when nobody is watching the
 dashboard — that is normal, and it means the message is **waiting in the user's inbox**, not
-lost.
+lost. It is not on the Dashboard: see "Where a message becomes visible".
 
 ### Finished tasks keep their inbox row
 
@@ -301,6 +335,31 @@ from "somebody else acked it", and how it can name a task that disappeared.
 `config.json` holds a credential. Keep the directory at 0700 and out of version control
 (the `anet` CLI writes the same `.anet/` layout and adds it to `.gitignore` for you).
 
+## Cleaning a node that was deleted locally only
+
+`anet node delete <ref> --force` removes the **local** directory first and the **hub** row
+afterwards (`bin/cli.ts`: `stopResolvedNode` → `rmSync(nodeDir)` → `removeNodeFromHub`, matched by
+`node_id` only). If the hub half fails, the CLI warns and exits 1 with the retry command — the
+local files are already gone, so the ref you need is the **node_id in that warning**:
+
+```bash
+anet node delete <node_id> --hub-only --hub <hub-url>
+```
+
+Telling residue apart, with read-only calls (note that `anet node list` reads the local directory
+only — it proves nothing about the hub):
+
+- `GET /api/nodes?network_id=<id>` still lists the node, and its `config_path` points at a
+  `.anet/nodes/<alias>/config.json` that no longer exists on that machine;
+- the `sessions` row is `offline`, and keeps a `lifecycle_state` of `active` that no process backs;
+- the alias stays taken, so re-creating a node under the same name is refused
+  (`alias_taken` / `node_owner_mismatch`).
+
+What `DELETE /api/nodes/:id` touches: the `nodes` row, that alias's `sessions` rows, the node's
+membership in agent teams (#764) and its references in requirement cards (#3277). It deletes
+**no tasks, no inbox rows and no completions** — history survives, including tasks addressed to a
+name that no longer exists.
+
 ## Failure modes
 
 | Symptom | Cause | Fix |
@@ -317,3 +376,6 @@ from "somebody else acked it", and how it can name a task that disappeared.
 | `task <id> not found` on `reply`, but the id is in your inbox | it is a **chat message**, not a task | `dm <from_session> "<text>"` |
 | heartbeat log says `hub unreachable` | wrong `--hub`, or the hub is down | fix the address in the config |
 | `node_owner_mismatch` on `init` | that alias belongs to another node id or owner | reuse the existing config, or pick another alias |
+| 私信在 Dashboard 看不到 | `dm` 落 `user_inbox`，Dashboard 没有读它的页面 | 交付走 `reply --via send_reply`（落 `inbox`，Messages 页可见）；私信只作提醒 |
+| dashboard 上手动节点显示成登录名（如 `admin`） | 前端在 `nodes.owner_user_id` 为 null 时的回退标签，不是 hub 身份 | 派活只认节点真实 alias；`GET /api/status?alias=admin` 实测 0 行 |
+| 节点在 dashboard 永久离线、名字还被占用 | 本地删了、hub 行没删（残留） | `anet node delete <node_id> --hub-only --hub <url>` |
