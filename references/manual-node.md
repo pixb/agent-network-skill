@@ -157,6 +157,41 @@ a finished task would strand it. The warning is the only signal that the run was
 rather than pretending: `working` re-reads the task and refuses to continue unless the hub
 now says `running`; `reply` re-reads the task and prints the resulting status.
 
+## Why "the dashboard says offline" is a presence-stream question, not a heartbeat one
+
+The dashboard's node card decides online/offline from **one** thing: whether the hub's
+`/health` reports an SSE session for `"<network_id>:<alias>"`
+(`app/lib/presence.ts`, `isOnline()` → `sseCountFor(...) > 0`). Heartbeat state is used for
+the *status text* (`working` / `idle`), never for the online dot. A node that heartbeats
+without an SSE session shows as **offline** while the hub's own `/api/status` counts it as
+`working` — the two views genuinely disagree, and both are correct by their own definition.
+
+Since 2026-11-04 the script opens that stream itself (`GET /events/<alias>` with the node's
+own `ntok_` token, plus the `X-Anet-Instance-Id` header the hub uses for supersede), so a
+running manual node appears online in the dashboard. It behaves like the daemon on purpose:
+reconnect with exponential backoff (2s → 30s cap), and on a `node_connection_superseded`
+frame (hub keeps exactly one stream per identity, #2299) it backs off 30s → 600s instead of
+fighting the winner every second. So starting a daemon under the same alias, or starting a
+second manual node, does not produce a reconnect loop.
+
+```bash
+# in the `start` log, and in `status`:
+[manual-node] 2026-01-01T00:00:00Z sse connected — dashboard will count this node as online
+presence stream: connected (3 connects, 0 dropped)
+
+# to turn it off (the dashboard will then show this node offline, by design):
+ANET_MANUAL_SSE=0 ./anet_manual_node.sh start --node my-manual-node --project-root /path
+```
+
+Check it against the hub, not against the dashboard UI:
+
+```bash
+curl -s -H "Authorization: Bearer $ANET_TOKEN" http://<hub>/health | jq '.sse_sessions["<network_id>:<alias>"]'
+```
+
+`0` / absent means the dashboard will call that node offline no matter what the heartbeat
+says. `>= 1` means the card shows online.
+
 ## Why the body is fetched, never retyped
 
 `report_status(status="working", task=X)` only moves the task to `running` when

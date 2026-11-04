@@ -371,6 +371,12 @@ Read `references/manual-node.md` for the full command set, the token rules, the 
 why the task body is fetched from the hub instead of retyped. Read `references/ttl-and-expiry.md`
 for how long a dispatched task actually lives.
 
+One of those failure modes is worth knowing here: the dashboard decides online/offline from the
+hub's **SSE session** for `<network_id>:<alias>`, not from the heartbeat, so `start` also opens
+`GET /events/<alias>` with the node's own `ntok_` token. A heartbeat alone leaves the card reading
+**offline** while the hub's `/api/status` says `working`. `ANET_MANUAL_SSE=0` closes the stream (the
+log then says so, and the card resumes reading offline).
+
 ### 7.0 Who the manager is, and where each message must go
 
 **The manager is a user, not a node, and that is the normal shape — not a workaround.**

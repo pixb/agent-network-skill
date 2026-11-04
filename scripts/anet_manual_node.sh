@@ -153,6 +153,7 @@ PIDFILE="$STATE_DIR/manual-heartbeat.pid"
 LOGFILE="$STATE_DIR/manual-heartbeat.log"
 STATUSFILE="$STATE_DIR/manual-status.json"
 SEENFILE="$STATE_DIR/manual-seen.json"
+SSEFILE="$STATE_DIR/manual-sse.json"   # presence 流状态（status 命令读它）
 CLIENT="$STATE_DIR/anet-manual-node-client.mjs"
 
 mkdir -p "$STATE_DIR"
@@ -939,9 +940,158 @@ async function check() {
   });
 }
 
+// ── presence stream（dashboard 判「在线」的唯一口径）──────────────────────────
+// Dashboard 的在线判定只认一件事：hub `/health` 的 `sse_sessions` 里有没有
+// `network_id:alias`（agent-network-dashboard `app/lib/presence.ts:40`，注释把口径写死了：
+// SSE-reachable = "can I talk to it right now"）。手动节点只做 `report_status` 心跳，
+// 从不建这条流，于是出现两边都对、口径不同的现象：hub `/api/status` 报 working，
+// dashboard 节点卡报 offline（2026-11-04 生产实测：sse_sessions 只有
+// `net_b91c0d535346:admin`，两个手动节点都不在里面）。
+//
+// 这条流就是让手动节点与 runtime 节点在同一个口径下被看见。语义与 agent-node daemon
+// 等价（`agent-node/src/cli.ts` 的 `connectSSE` + `util/sse-node-identity.ts`），
+// 两条实测参数照抄：
+//   - 一次稳定连接之后失败：首次重连摊开 0–8s 抖动。hub 重启会把所有节点的流同时打断，
+//     生产实测 367 个节点同秒重连打出 `mcp_inflight_peak=308`（≈400MB RSS）。
+//   - 连续失败：指数退避 2/4/8… 上限 30s。
+//   - `node_connection_superseded`（hub #2299 每身份只保留最新一条流）：退避 30s 起、
+//     上限 600s。手动节点与同 alias 的 daemon 互顶时必须慢，否则两边每秒互抢。
+const SSE_ON = (process.env.ANET_MANUAL_SSE || "1") !== "0";
+const SSEFILE = process.env.ANET_MANUAL_SSEFILE || "";
+const SSE_SUPERSEDED = "node_connection_superseded";
+const INSTANCE_ID = (() => {
+  const r = () => Math.floor(Math.random() * 36 ** 4).toString(36).padStart(4, "0");
+  const id = `an-${r()}${r()}-${Date.now().toString(36)}`;
+  // hub 的 INSTANCE_ID_RE 是 ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$；不合格式的 id
+  // 会被 hub 当「没有」，#507 的互顶检测就静默失效。
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id) ? id : `an-${Date.now().toString(36)}`;
+})();
+
+const sseStats = {
+  started_at: nowIso(), connected: false, since: null,
+  connects: 0, reconnects: 0, superseded: 0, last_error: null, last_reason: null,
+};
+function writeSse(extra = {}) {
+  if (!SSEFILE) return;
+  try { writeFileSync(SSEFILE, JSON.stringify({ ...sseStats, ...extra, at: nowIso() })); } catch {}
+}
+
+function isSupersededFrame(ev) {
+  return !!ev && typeof ev === "object" && (ev.type === SSE_SUPERSEDED || ev.event === SSE_SUPERSEDED);
+}
+
+// 一次流的完整生命周期。返回 { reason, stable }：stable=这条流曾稳定过（>60s），
+// 下一次重连应该摊开抖动而不是接着指数退避。
+async function sseConnectOnce() {
+  const openedAt = Date.now();
+  let res;
+  try {
+    res = await fetch(`${hub}/events/${encodeURIComponent(alias)}`, {
+      headers: {
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+        "X-Anet-Instance-Id": INSTANCE_ID,
+        Authorization: "Bearer " + token,
+      },
+    });
+  } catch (e) {
+    sseStats.last_error = e.message;
+    console.error(`${nowIso()} sse connect failed: ${e.message}`);
+    return { reason: "connect", stable: false };
+  }
+  if (!res.ok || !res.body) {
+    // 401/403 的来头各不相同，文案要给到能直接行动的那一步（token 只提名字，绝不打印值）。
+    const hint =
+      res.status === 401 ? " token 失效 -> anet_manual_node.sh init --node " + alias
+      : res.status === 403 ? " 403：令牌不是这个网络的节点令牌，或 alias 不在该网络 -> init --node " + alias
+      : "";
+    sseStats.last_error = `http ${res.status}`;
+    console.error(`${nowIso()} sse open http ${res.status}${hint}`);
+    return { reason: `http ${res.status}`, stable: false };
+  }
+  sseStats.connects++;
+  if (sseStats.connects > 1) sseStats.reconnects++;
+  sseStats.connected = true;
+  sseStats.since = nowIso();
+  sseStats.last_error = null;
+  console.log(`${nowIso()} sse connected ${network_id ? network_id + ":" : ""}${alias}`);
+  writeSse();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "", superseded = false, reason = "eof";
+  while (!superseded) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() || "";
+    for (const line of lines) {
+      const payload = line.startsWith("data:") ? line.slice(5).trim() : null;
+      if (!payload) continue;
+      let ev = null;
+      try { ev = JSON.parse(payload); } catch { continue; }
+      if (isSupersededFrame(ev)) {
+        superseded = true;
+        sseStats.superseded++;
+        sseStats.last_reason = ev.reason || "unknown";
+        console.error(
+          `${nowIso()} sse SUPERSEDED (reason=${sseStats.last_reason}) for ${alias}: ` +
+          `另一个进程占用了这个身份的流。若是同 alias 的 daemon 在跑，这是预期的互顶 —— ` +
+          `手动节点会退避到 ${Math.round(SSE_SUPERSEDE_CAP / 1000)}s 重试，不与它抢`,
+        );
+        try { await reader.cancel(); } catch {}
+      }
+    }
+  }
+  if (!superseded) {
+    reason = "eof";
+    console.log(`${nowIso()} sse stream closed`);
+  }
+  sseStats.connected = false;
+  sseStats.since = null;
+  writeSse();
+  const stable = Date.now() - openedAt > 60_000;
+  return { reason, stable, superseded };
+}
+
+const SSE_SUPERSEDE_CAP = 600_000;
+const SSE_BACKOFF_CAP = 30_000;
+
+async function sseLoop() {
+  let attempt = 0, supersedeDelay = 30_000;
+  writeSse();
+  for (;;) {
+    const r = await sseConnectOnce();
+    let delay;
+    if (r.superseded) {
+      delay = supersedeDelay;
+      supersedeDelay = Math.min(supersedeDelay * 2, SSE_SUPERSEDE_CAP);
+      attempt = 0;
+    } else if (r.stable) {
+      // 稳定过 -> 这是一次新的独立故障（hub 重启就是这种），抖开，不接着指数退避。
+      attempt = 0;
+      supersedeDelay = 30_000;
+      delay = Math.floor(Math.random() * 8_000);
+    } else {
+      attempt++;
+      delay = Math.min(2 ** attempt * 2_000, SSE_BACKOFF_CAP);
+    }
+    console.log(`${nowIso()} sse reconnect in ${(delay / 1000).toFixed(1)}s (reason=${r.reason})`);
+    await sleep(delay);
+  }
+}
+
 // ── entry point ────────────────────────────────────────────────────────────
 async function main() {
   if (MODE === "watch") {
+    // presence 流与心跳并行：它是 hub 侧「此刻连得上」的证据，心跳是「我在干活」的证据。
+    // 缺一条流，dashboard 就把活着的手动节点显示成 offline（见上面 presence stream 注释）。
+    // 不 await：流的退避再长也不能让心跳停摆。
+    if (SSE_ON && token) {
+      sseLoop().catch((e) => console.error(`${nowIso()} sse loop died: ${e && e.message}`));
+    } else if (MODE === "watch") {
+      console.log(`${nowIso()} presence stream disabled (ANET_MANUAL_SSE=0 or no node token) -> dashboard 会显示 offline`);
+    }
     for (;;) {
       try {
         await heartbeatOnce();
@@ -1001,6 +1151,7 @@ cmd_start() {
   env \
   "ANET_MANUAL_CONFIG=$CONFIG" "ANET_MANUAL_STATUSFILE=$STATUSFILE" \
   "ANET_MANUAL_SEENFILE=$SEENFILE" \
+  "ANET_MANUAL_SSEFILE=$SSEFILE" \
   "ANET_MANUAL_INTERVAL=$INTERVAL" "ANET_MANUAL_HUB=$HUB_OVERRIDE" \
   "ANET_MANUAL_NETWORK=$NETWORK_OVERRIDE" "ANET_MANUAL_NODE=$NODE_NAME" \
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \
@@ -1060,6 +1211,13 @@ case "$COMMAND" in
   status)
     if running; then echo "running (pid $(cat "$PIDFILE"))"; else echo "not running"; fi
     echo "reported state: $(cat "$STATUSFILE" 2>/dev/null || echo '(none — defaults to idle)')"
+    echo "presence stream: $(
+      if [ -f "$SSEFILE" ]; then
+        cat "$SSEFILE"
+      else
+        echo '(no sse state — 旧版启动的进程，重启后生效)';
+      fi
+    )"
     [ -f "$LOGFILE" ] && tail -n 5 "$LOGFILE" || true
     ;;
   logs) tail -f "$LOGFILE" ;;
