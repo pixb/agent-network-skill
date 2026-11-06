@@ -368,7 +368,9 @@ machine that owns the node. It is the whole protocol, made explicit:
 ```
 
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and
-why the task body is fetched from the hub instead of retyped. Read `references/ttl-and-expiry.md`
+why the task body is fetched from the hub instead of retyped. Read `references/ttl-and-expiry.md` (including the rule
+`ttl_seconds >= 2 x node idle budget`, and the pi failure codes that are safe to quote
+verbatim in acceptance)
 for how long a dispatched task actually lives.
 
 One of those failure modes is worth knowing here: the dashboard decides online/offline from the

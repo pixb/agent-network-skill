@@ -51,3 +51,35 @@ print("expired:",len(rows),"ttl min/median/max:",min(ttl) if ttl else "-","sorte
 ```
 
 `ttl median` 落在 3600 上，就是「大家都在用默认值」的信号；把它变成显式决定即可。
+
+## 任务的 TTL 必须盖过节点跑完一条任务的时间（2026-11-06）
+
+指挥室常见的假象：任务在 hub 侧 `expired`，节点**还在跑**。低端设备 + 本地大模型
+的节点尤其容易撞上 —— 一次上下文压缩就是分钟级（实测 GTX 1070 8GB、131K 上下文：
+一次压缩 7–9 分钟），而 hub 的默认 TTL 是 3600s。
+
+判据（派活时算一下）：
+
+```
+ttl_seconds ≥ 2 × (节点 idle 预算秒数)
+节点 idle 预算 = PI_TIMEOUT_MS / 1000（默认 1800s ⇒ TTL 至少 3600s）
+```
+
+节点侧的旋钮在启动横幅里会点名来源（env > flags > 默认）：
+
+```
+[pi] promptAck=900000ms(env) handshake=45000ms(default) lateAck=30000ms lateGrace=90000ms
+[pi] idle=1800000ms(flags.piTimeoutMs) busyPolicy=queue rollover=262144B carry=1200chars
+```
+
+看到 `source=floor` 说明你写的值比一次压缩还短，被夹住了。
+
+**节点报的失败码是可以照抄进验收判据的**（都不会被无谓重放）：
+`pi_prompt_ack_timeout`（等 pi 接受超时，消息里点名旋钮）、`pi_prompt_rejected`、
+`pi_handshake_timeout`、`pi_runtime_busy`（busyPolicy=skip 下本轮未提交）。
+
+**「pi 忙 / 正在压缩」不是失败**：节点会把排队状态经 `report_status("working", …)` 报出来，
+任务保持 running。看到这种状态先等，不要 `retry_task` —— 重发会让 pi 把同一任务跑两遍。
+
+完整运维页：`docs-site/docs/guide/pi-slow-local-model.md`；
+实测与断言：`docs/tests/report-pi-rpc-ack-20261106.txt`。
