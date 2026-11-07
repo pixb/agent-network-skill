@@ -1,8 +1,8 @@
 # Verification: agent-network-skill
 
-<!-- agent-skill-verification: {"clean": true, "commit": "4a12350fa3451d28886caa96d830c16fe48ba1f1", "fingerprint": "61592cb154d868b53e8f6639cee331a74e9b0c569491c71c61f139380e40c224", "version": "0.6.0"} -->
+<!-- agent-skill-verification: {"clean": true, "commit": "647909d02824e0cc8076b1fc3c2325e0aa2849c0", "fingerprint": "37126ad4cbfe7f7c979eac0fbfa779a12ed34e24b76bfe3d1c050697af5551ea", "version": "0.6.1"} -->
 
-Generated: 2026-11-07T19:50:24Z
+Generated: 2026-11-07T20:23:54Z
 
 ## Release evidence
 
