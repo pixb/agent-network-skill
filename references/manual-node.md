@@ -192,6 +192,39 @@ curl -s -H "Authorization: Bearer $ANET_TOKEN" http://<hub>/health | jq '.sse_se
 `0` / absent means the dashboard will call that node offline no matter what the heartbeat
 says. `>= 1` means the card shows online.
 
+## One command per round; the body you receive is a pointer
+
+Every command above is one commhub call, so it is **one round** (SKILL.md §1.1). `inbox && working &&
+reply` on a single shell line is three commhub calls in one round: the node has one session slot, so
+the middle one overwrites the preview of the first, and if one of the three fails you are left with
+three responses and no way to tell which transition the hub took. Run one, read its verdict, run the
+next one in the next round.
+
+The task a manual node receives is normally a 4-line pointer (SKILL.md §1.2):
+
+```text
+第7轮 seg-01：头三段配图，3 张暖金佛像特写入库
+file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 54b3cd5aa536
+branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+report_completion once, result <= 400 chars
+```
+
+So the human side of the job is: `git pull`, then prove the pointer with the sibling script:
+
+```bash
+scripts/anet_payload.sh verify --file commhub_tasks/r07/spec.md --seg seg-01 \
+    --sha12 54b3cd5aa536 --print-body
+```
+
+- a mismatch (or a missing segment) is a **conflict**: run `working`, then say so in `reply` — never
+  work on the revision you happen to have;
+- work the printed **segment**, not the task text;
+- `reply` carries a ≤400-character result (conclusion, what you ran to verify it, the path of the
+  long report); the long report goes into the segment's 产出 section and gets committed.
+
+Short bodies matter *more* for a manual node than for a runtime one: the script sends the stored body
+back verbatim, and a short body is the only version a human can also reproduce without drifting — and
+a drifted body is exactly what leaves a task stuck in `acked`.
 ## Why the body is fetched, never retyped
 
 `report_status(status="working", task=X)` only moves the task to `running` when

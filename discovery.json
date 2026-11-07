@@ -9,6 +9,7 @@
   ],
   "decision": [
     "Call the MCP tools according to the role flows and state machine defined in SKILL.md",
+    "Issue at most one CommHub call per round (read-only calls included), and keep task/message parameters short: the long text goes into a payload-file segment and the parameter carries file + seg + sha12 (SKILL.md §1.1, §1.2, scripts/anet_payload.sh)",
     "When a parameter mismatch stalls the state, repair it per Gotchas (cancel/retry, or add the correct completion)",
     "Judge cross-machine results from the hub task row only — never read the other side's directory",
     "For a manual node, drive the protocol with scripts/anet_manual_node.sh and read the task row, never the session status, to decide whether work started"
@@ -19,7 +20,7 @@
     "Postmortems and verification of the cross-machine two-agent loop (exact task-body matching, ack/working/completion order)",
     "references/manual-node.md — the manual-node lifecycle, its token rules, and the online-vs-working diagnosis"
   ],
-  "success_measure": "The planner dispatches per the hard rules and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task; a manual node's task also reaches replied, driven by the bundled script",
+  "success_measure": "The planner dispatches per the hard rules (one commhub call per round, a short pointer body the worker can echo byte-for-byte) and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task; a manual node's task also reaches replied, driven by the bundled script",
   "outcome": "Two agents complete a verifiable task loop under one protocol, and a manual node is driven through the same lifecycle without an agent behind it",
   "intended_users": ["planner agent (control room)", "worker agent (executor)", "human operator"],
   "input_types": ["task instructions", "MCP tool responses", "manual node hub url and node alias"],
@@ -29,6 +30,14 @@
     {
       "invocation": "/agent-network-skill split this round's work and dispatch it to <worker-alias>",
       "description": "The planner dispatches per the hard rules: self-contained body, ttl 86400, \"do it in your working directory\""
+    },
+    {
+      "invocation": "/agent-network-skill the task brief is 2000 characters, dispatch it properly",
+      "description": "Write the brief into commhub_tasks/<round>/spec.md as ## seg-NN segments, commit and push, then send_task with the 4-line pointer body built by scripts/anet_payload.sh compose (summary line + file + seg + sha12) — one commhub call this round"
+    },
+    {
+      "invocation": "/agent-network-skill I dispatched three tasks and checked status in one turn, what state is the hub in",
+      "description": "One commhub call per round is the rule (SKILL.md §1.1): read the hub state with a single get_task per round, find which transition actually landed, then continue one call per round"
     },
     {
       "invocation": "/agent-network-skill take a task and report per protocol (worker side)",
@@ -96,6 +105,8 @@
   "routing_tests": {
     "should_trigger": [
       "dispatch the task \"implement X\" to <worker-alias>",
+      "the task brief is 2000 characters, dispatch it properly",
+      "I dispatched three tasks and checked status in one turn, what state is the hub in",
       "take a task and report per protocol",
       "how do I fix a task stuck in acked",
       "verify <worker-alias>'s tasks",
@@ -106,7 +117,9 @@
       "任务卡在 acked 怎么修",
       "手动节点收到任务了但没人开工，怎么看",
       "手动节点手上有两个任务",
-      "任务没被 ack"
+      "任务没被 ack",
+      "任务正文太长，怎么派",
+      "一轮发了好几个 commhub 调用"
     ],
     "should_not_trigger": [
       "edit opencode's own configuration",

@@ -3,15 +3,15 @@ name: agent-network-skill
 description: >-
   CommHub MCP task protocol for planners (send_task / get_task / list_tasks) and workers (get_inbox /
   ack_inbox / report_status / report_completion): token tiers (utok/atok/ntok), the task lifecycle
-  state machine, the exact-match parameter rules, cross-machine path-independent conventions,
-  requirement-pool mode (tasks with no named worker, requirements_*, claiming), and manual nodes
-  (no MCP runtime) driven by scripts/anet_manual_node.sh. Triggers: dispatch a task, take a task,
-  verify work, check inbox, task stuck in acked or delivered, alias_not_found, report_completion has
-  no effect, commhub, agent-network, MCP worker, control room, requirement pool, manual node
-  heartbeat, dashboard node card shows truncated task text. Chinese triggers (keep matching these):
-  派任务、收任务、验收、查 inbox、任务卡在 acked 或 delivered、alias_not_found、report_completion 不生效、
-  commhub、agent-network、MCP 工人、指挥室、需求池、手动节点、手动节点心跳、任务没被 ack、
-  dashboard 节点卡片任务文本被截断。
+  state machine, the exact-match parameter rules, cross-machine conventions, requirement-pool mode,
+  manual nodes (no MCP runtime) via scripts/anet_manual_node.sh, and the call-discipline rules: one
+  commhub call per round, short task/message parameters with long text in a payload file segment
+  addressed by path + seg id + sha12. Triggers: dispatch a task, take a task, verify work, check
+  inbox, task stuck in acked or delivered, alias_not_found, report_completion has no effect, one call per round,
+  task body too long, commhub, agent-network, MCP worker, control room, requirement pool, manual node
+  heartbeat, dashboard node card truncated. Chinese triggers (keep matching these): 派任务、收任务、验收、查 inbox、任务卡在 acked、
+  alias_not_found、report_completion 不生效、commhub、MCP 工人、指挥室、需求池、手动节点、任务没被
+  ack、一轮一个调用、任务正文太长、参数太长、长文本落盘。
 license: MIT
 activation: /agent-network-skill
 compatibility: >-
@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.5.0
+  version: 0.6.0
   created: 2026-10-07
-  last_reviewed: 2026-10-20
+  last_reviewed: 2026-11-07
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.5.0
+  version: 0.6.0
   created: 2026-10-07
 ---
 
@@ -51,6 +51,8 @@ Invocation examples:
 
 - `/agent-network-skill check the commhub connection and my token`
 - `/agent-network-skill split this round's work and dispatch it to <worker-alias>, ttl 86400`
+- `/agent-network-skill the task body is too long, move it into a payload file and dispatch a pointer`
+- `/agent-network-skill I fired three commhub calls in one turn, what state is the hub in now`
 - `/agent-network-skill take a task and report per protocol`
 - `/agent-network-skill verify every task for <worker-alias>`
 
@@ -88,35 +90,14 @@ and a missing token gives a flat `401 unauthorized`; `anet node create` is block
 
 CLI token lookup order: `--token` → env var `COMMHUB_TOKEN` → `~/.anet/config.json`.
 
-### 0.1.1 Token operations and troubleshooting (revocation is irreversible — look before you act)
+### 0.1.1 Token operations and troubleshooting
 
-- **Every login adds a token; the old ones stay valid**: `anet login` (CLI / dashboard / a second
-  machine) each issues its own utok and **does not rotate or kick out the previous ones**. So a long
-  list of `user-login` rows in `anet token ls` is normal; the practical rule is **one token per
-  machine**, revoked when that machine is retired.
-- **What actually idle-expires**: a utok (`scope='user'`, not network-bound) expires after
-  `COMMHUB_SESSION_IDLE_DAYS` days of disuse (default 30, 0 = off); **`atok_` and `ntok_` never
-  expire** (long-lived credentials — only manual revocation ends them).
-- **`last_used_at` has hour granularity** (written at most once an hour) — never use it as
-  second-by-second proof of presence.
-- **The hub stores only sha256 and records no IP**: the plaintext cannot be reversed, and "which
-  machine is using this" is unanswerable. The only way to claim a token is login metadata: a CLI
-  login is `kind=cli` + `client_label` "`anet <version> · <host> · <subcommand>`"; **a dashboard /
-  browser / app login is `kind=login` with no label**.
-- **Confirm which token this machine is using**: `anet token ls` gives IDs only; to identify an ID,
-  read the metadata — when you can read the hub DB, compare
-  `printf %s '<plaintext>' | sha256sum` against `api_tokens.token_hash` (`hashToken()` = bare sha256
-  hex), with the plaintext taken from local config (`token` in `~/.anet/config.json`).
-- **`anet token revoke <token-id>` is a hard delete with no undo**, and it accepts user tokens only
-  (node tokens are refused). Revoking a node's ntok = that node gets a **401 on its next start** and
-  must be re-created with `anet node create`. **Back up the hub database (including `-wal` / `-shm`)
-  before touching anything.**
-- **`Session expired. Run: anet login`** = this login token was revoked or idle-expired; log in
-  again — **other machines are unaffected** (logging in does not rotate anyone else's token).
-- **`anet token ls` is not enough**: it shows only ID / NAME / CREATED / LAST USED, **no label or
-  kind**, and its times are **UTC** (8 hours behind local — don't read a token you just created as
-  "yesterday's"). For device / current-session detail use `GET /api/auth/sessions` (includes
-  `is_current`; needs a user token).
+Read `references/token-operations.md` before touching a token — **revocation is a hard delete with no
+undo**, `anet token revoke` accepts user tokens only (a node whose `ntok_` is revoked gets a 401 on
+its next start), every login mints a *new* token and never rotates the old ones, `last_used_at` has
+hour granularity, the hub stores only sha256 and no IP, and `anet token ls` prints no label/kind and
+reports UTC times. The short version: **one token per machine**, back up the hub database (with
+`-wal` / `-shm`) before revoking anything, and use `GET /api/auth/sessions` for device detail.
 
 ### 0.2 Client setup
 
@@ -170,22 +151,84 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
    `anet whoami` when in doubt.
 2. **Split the work**: every task must be self-contained (background + what to do + completion
    criteria) and must state "**do this in your own working directory**", with relative paths only
-   (forbidden forms in §4). The operator names the `alias` — **never assume a default**.
-3. **Dispatch**:
-   - One call per task: `send_task(alias=<worker-alias>, task=<body>, context=<background/references>,
-     priority=<high|normal|low>, ttl_seconds=<default 3600, 86400 for long jobs>)`.
+   (forbidden forms in §4). Write the long version of that into a **payload file segment** (§1.2) and
+   dispatch a pointer at it. The operator names the `alias` — **never assume a default**.
+3. **Dispatch** (§1.1 and §1.2 are hard rules, not style):
+   - One call per task **and one commhub call per round**: `send_task(alias=<worker-alias>,
+     task=<short body>, context=<one line>, priority=<high|normal|low>, ttl_seconds=<default 3600,
+     86400 for long jobs>)`. N tasks = N rounds, not N calls.
+   - The body is a **pointer**: a one-line summary plus `file:` / `seg:` / `sha12:` (§1.2). Compose
+     Run `bash scripts/anet_payload.sh compose` to build it; the spec text stays in the payload file.
    - Use `parent_task_id` to chain only changes that affect each other.
-   - **Stop after dispatching**: don't also dispatch the next batch in the same turn and don't poll —
-     the recipient is an asynchronous AI; wait for its own completion signal (`report_completion` /
-     a terminal `get_task`).
-4. **Verify**:
-   - `get_task(task_id)` / `list_tasks(alias=<worker-alias>)` to check status and result.
-   - `get_all_status` for global busy/idle.
+   - **Stop after dispatching**: the round ends with the dispatch. Don't also poll, don't also check
+     status, don't also dispatch the next task — the recipient is an asynchronous AI; wait for its
+     own completion signal (`report_completion` / a terminal `get_task` in a later round).
+4. **Verify** (one call per round, §1.1):
+   - `get_task(task_id)` in one round; `list_tasks(alias=<worker-alias>)` in another.
+   - `get_all_status` for global busy/idle — its own round.
    - `get_completions(alias=<worker-alias>)` for the actual output and the self-score (0-10).
    - Verification is read-only: don't touch the other side's directories or state; whether tasks
      from this round are left for you to dispose of is the operator's call.
 5. **Ask when unsure**: vague scope, or anything touching interfaces / deleting data / production —
    ask the operator first; don't decide for them.
+
+### 1.1 One commhub call per round (hard rule)
+
+**A round = one of your turns. In one round you issue at most one CommHub MCP call.** Every tool
+counts, read-only included: `send_task`, `get_task`, `list_tasks`, `get_all_status`,
+`get_completions`, `get_inbox`, `ack_inbox`, `report_status`, `report_completion`, `send_message`,
+`broadcast`, `requirements_*`. A codemode script, a shell loop, a parallel tool-call batch, or
+"dispatch three independent tasks at once" is **one round** and gets no exemption.
+
+| role | round N | round N+1 |
+|---|---|---|
+| planner | `send_task` (exactly one task) | read its completion, then decide the next task |
+| planner (verify) | `get_task(task_id)` | `get_completions` / `get_all_status`, one per round |
+| worker | `get_inbox(alias)` | `ack_inbox(message_id)` |
+| worker | `report_status(status="working", task=<body>)` | work, then `report_completion` (once) |
+
+Why it is protocol and not style: a batch is **undiagnosable** (three responses, and every repair in
+§3 hinges on which call moved which state); a node has **one session slot**, so parallel dispatch
+overwrites the preview and the first task vanishes from the node's status view (§7);
+`report_completion` is **once per task**, so a batch of reports lands on none of them; the recipient
+is **asynchronous**, so a second dispatch written before its completion is written blind; the dedupe
+window punishes the re-send habit a batch starts. Local work is free between rounds (`read`, `write`,
+git, bash, and `bash scripts/anet_payload.sh`); commhub calls are the scarce resource.
+
+### 1.2 Short parameters; the long text goes to a file (hard rule)
+
+Budgets for text passed **into** a commhub argument: `task` ≤ 300 characters, ≤ 6 lines, line 1
+≤ 80; `context` ≤ 200; `send_message` / `broadcast` `message` ≤ 200; `report_completion` `result`
+≤ 400 (the row stores 4000 — do not use them all). Never a pasted spec, a code block, a log, a diff,
+a table, a file's content, or an absolute path.
+
+Long text lives in a **payload file in your working tree** — `commhub_tasks/<round>/spec.md` by
+default — split into `## seg-NN <title>` anchors, **one segment per task**; the body is a 4-line
+pointer at one segment:
+
+```text
+第7轮 seg-01：头三段配图，3 张暖金佛像特写入库
+file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 54b3cd5aa536
+branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+report_completion once, result <= 400 chars
+```
+
+`sha12` = the first 12 hex characters of the sha256 of the segment text: it names the revision the
+worker must read. Build the body mechanically — run
+`bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 --summary
+"第7轮 seg-01：头三段配图，3 张暖金佛像特写入库" --branch main`, which prints the exact `task` text
+and refuses a >80-character summary, a >300-character body, a code block, an absolute path, and a
+payload file that is untracked, uncommitted, or unpushed (the worker pulls the branch; it cannot read
+your disk). Worker side: run `bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first;
+a non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never
+work on a guess.
+
+Why it is correctness, not cosmetics: `sessions.task` keeps the first 200 characters cut blindly (the
+node card, `get_all_status`, `/api/status`), and `report_status(status="working")` matches the body
+**byte-for-byte** — a long body is a long thing for the worker to reproduce without drifting, and a
+drift rots the task in `acked` (§3). Self-containment still holds: goal, steps and acceptance
+criteria live **inside the named segment**. Read `references/payload-files.md` for the segment
+format, the guards, the handoff routes and the failure modes.
 
 **Hard rules for the task body** (get these wrong and the worker will build the wrong thing):
 
@@ -195,40 +238,57 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
 - **One task, one deliverable**: don't stuff several deliverables into one body — both the state
   machine and the reporting turn to mush.
 - **TTL**: default 3600s for anything verified within the round; give 86400s explicitly for work
-  that runs across hours or overnight.
-- **First line is a one-line summary** (this is what the dashboard node card shows): put a one-line
-  summary on **line 1**, ≤80 characters, and make sure **the first 200 characters stand as a complete
-  sentence**; leave a blank line after it, then write the background / steps / acceptance markdown.
-  Why: `sessions.task` keeps only the **first 200 characters** of the body, cut **blindly** — no
-  sentence and no newline awareness; the dashboard node card, `get_all_status` and `/api/status` all
-  read that column. The full body (≤10000 characters) is intact in `get_inbox` / `get_task`, so never
-  put a long paragraph, a code block or a big paste at the front. The worker side is unaffected:
-  `report_status(status="working", task=…)` must still pass **the complete original text** (only an
-  exact match moves the task to `running`); the first-line summary is a dispatcher-side convention.
+  that runs across hours or overnight, and keep `ttl_seconds ≥ 2 × the node's idle budget` — read
+  `references/ttl-and-expiry.md` before shortening one.
+- **The body is a pointer, not the spec** (§1.2): ≤ 300 characters, ≤ 6 lines, with `file:` / `seg:` /
+  `sha12:` carrying the real content. A paste or code block in a parameter is the most reliable way to
+  stall a task.
+- **One commhub call per round** (§1.1): the dispatch *is* the round; N tasks = N rounds.
+- **First line is a one-line summary** (this is what the dashboard node card shows): line 1 is a
+  ≤80-character summary that **stands as a complete sentence**, because `sessions.task` keeps only the
+  **first 200 characters** of the body, cut **blindly** — no sentence and no newline awareness — and
+  the dashboard card, `get_all_status` and `/api/status` all read that column. A 4-line pointer fits
+  inside it; a paste at the front is what produces a half-sentence card. The full body stays intact in
+  `get_inbox` / `get_task`, and the worker is unaffected: `report_status(status="working", task=…)`
+  must still pass **the complete original text** (only an exact match moves the task to `running`).
 - **No absolute paths** (§4).
 
 ## 2. Role B: worker (executor)
 
 Tools: `get_inbox` `ack_inbox` `report_status` `report_completion`.
 
+**One commhub call per round (§1.1):** the steps below are one call each, so they are one round
+each. Reading the hub, acking, starting, and reporting are four rounds, not one turn with four
+calls in it. Between them you do local work (read files, run the tests), which costs nothing.
+
 1. **Register**: if the hub's sessions table has no row for your alias, the planner's dispatch
    returns `alias_not_found`. Call `report_status(alias=<self>, status="idle", resume_id=<session id>)`
    first to create the row (worker nodes usually get this from `anet node create` + the runtime).
 2. **Receive**: `get_inbox(alias=<self>)` for pending work; a task message's handle is the
-   `message_id` in the response (which is the `task_id`).
-3. **Acknowledge**: `ack_inbox(alias=<self>, message_id=<task_id>)` per task, optionally with
-   `response` ("received, starting"). This step alone drives `delivered → acked`.
-4. **Start**: `report_status(alias=<self>, status="working", task=<the task body>)` — `task` **must
-   be character-for-character identical** to the body (matching is exact-equality on the body only,
-   **there is no task_id branch**), otherwise the task stays in acked.
-5. **Report**: **exactly once** per task,
+   `message_id` in the response (which is the `task_id`). **One task at a time** — a node has one
+   session slot (§7, Gotchas).
+3. **Read the pointer** (local, not a commhub call): a dispatched body is normally
+   `file: … seg: seg-NN sha12: …` (§1.2). `git pull`, locate the segment, and verify it:
+   run `bash scripts/anet_payload.sh verify --file <path> --seg seg-NN --sha12 <sha12>`. A mismatch, a missing
+   segment, or a missing file is a **conflict to report**, not a licence to guess: take the task,
+   start it, and state the conflict in `result`.
+4. **Acknowledge** (own round): `ack_inbox(alias=<self>, message_id=<task_id>)` per task, optionally
+   with `response` ("received, starting"). This step alone drives `delivered → acked`.
+5. **Start** (own round): `report_status(alias=<self>, status="working", task=<the task body>)` —
+   `task` **must be character-for-character identical** to the body (matching is exact-equality on
+   the body only, **there is no task_id branch**), otherwise the task stays in acked. Copy the body
+   out of the `get_inbox` / `get_task` response; never retype it, never "tidy" it. This is the step
+   that a short body makes reliable (§1.2) and that a manual node must do by hand (§7.1).
+6. **Report**: **exactly once** per task, in its own round,
    `report_completion(alias=<self>, task=<task_id is safest; the raw body must match character-for-character if used>,
    result=<summary: conclusion / changes / how you verified — the task row keeps only the first 4000
    characters>, artifacts=[<URL or file path>])`. You may also pass `score` (self-assessed 0-10).
+   `result` is ≤400 characters: conclusion, how it was verified, and the path of the long report —
+   the long report goes in the file (in the segment's 产出 section), not in the parameter.
    Merging several tasks into one report = none of them take effect.
-6. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
+7. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
    session to idle).
-7. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
+8. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
    change status without reporting.
 
 **Worker discipline**:
@@ -236,6 +296,10 @@ Tools: `get_inbox` `ack_inbox` `report_status` `report_completion`.
 - Report after the work is done, not before; every verification you claim in `result` must have
   actually been run.
 - One completion per task; never merge several tasks into one report.
+- One commhub call per round (§1.1); a `get_inbox` + `ack_inbox` + `report_status` fired in one turn
+  is the fastest way to lose track of which transition the hub accepted.
+- Verify the payload file (path + segment + sha12) before working; report a mismatch instead of
+  working on the wrong revision.
 - When the task contradicts the repository (say, the file to delete does not exist), **state the
   conflict in `result`** — don't unilaterally widen the change.
 
@@ -260,7 +324,14 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
 
 **Parameter hard rules**
 
-- `report_completion(task=…)` matching: **`task_id` first; on a miss, `to_name=alias AND
+- **One commhub call per round** (§1.1). A turn that fires several commhub calls leaves you with no
+  way to tell which transition the hub accepted, and a batch of `report_completion` calls on one node
+  overwrites the single session slot. Local calls (files, git, bash) are unlimited.
+- **Keep the body short** (§1.2, ≤300 characters). The body is echoed back byte-for-byte by the
+  worker in `report_status`, so every paragraph you paste into the parameter multiplies the chance of
+  a drift that stalls the task in `acked`. Long text goes in a payload file; the parameter carries
+  `file:` + `seg:` + `sha12:`.
+- `report_completion(task=…)`: matching: **`task_id` first; on a miss, `to_name=alias AND
   content=<body>`**, taking the most recent match.
 - `report_status(task=…, status="working")` flips a task to running **only** on
   `to_name=alias AND content=<body>` exact-equality, **with no task_id branch** — passing a
@@ -294,6 +365,11 @@ paths:
   a `file_id`, then put it in `report_completion` / `send_task` as
   `meta.attachments: [{type:"file", file_id}]` (when a `file_id` is present the hub strips `path`,
   precisely for cross-machine safety).
+- **A payload file travels the same two routes** (§1.2): commit it and **push the branch before
+  dispatch** (the worker pulls, then runs `bash scripts/anet_payload.sh verify`), or upload it and
+  name the `file_id` plus the sha12 on the pointer line. A payload file that only exists on the
+  dispatcher's disk is worse than no file: the worker cannot read it, and an absolute path to it is
+  forbidden anyway.
 - **Trust only the hub for state**: planners use `get_task` / `list_tasks` / `get_all_status`; workers
   use `get_inbox`.
 
@@ -341,7 +417,11 @@ version **≥ 0.9.0-preview.67** (on 0.9.0-preview.64/65/66 node tokens could no
   agent_owner={kind:"node", alias=<self>})`.
 - Collaborate: `requirements_comment` for progress; `requirements_checklist_toggle` to tick one item
   (it writes only that item and never overwrites anyone else's edit).
-- Query: `requirements_list(q=..., tag=..., status=...)`, `requirements_get(id or "#N")`.
+- Query: `requirements_list(q=…, tag=…, status=…)`, `requirements_get(id or "#N")`.
+
+The same two rules apply here: one `requirements_*` call per round (§1.1), and a short
+`name` / `description` that points at a payload file plus its segment (§1.2) instead of a pasted
+requirement document.
 
 **Upgrade note**: `anet hub start --version <v>` only affects a **fresh start** (an already-running
 hub will not switch versions because of it) — to change version, `anet hub stop` first, or change the
@@ -540,7 +620,25 @@ session status:
   and the dispatcher gets no unread badge. That is the usual cause of "我发了，Dash 上看不见".
   Use `--via send_reply` when the text must be read, `dm` when a person must be notified.
 
-- **Planner**: stop after dispatching — no waiting, no polling; ask first when a task is vague.
+
+### 7.4 One command per round; the body you receive is a pointer
+
+Every command in §7 is a commhub call, so it is **one round** (§1.1): `inbox && ack && working &&
+reply` on one shell line is four calls in one round — the node's single session slot gets overwritten,
+and if one of them fails you have four responses and no idea which transition the hub took. Run one,
+read its verdict, run the next in the next round.
+
+The dispatched body is normally a 4-line pointer (`file:` / `seg:` / `sha12:`, §1.2). `working`
+fetches that body from the hub (never retype it), and the human works the **file**: run
+`bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
+file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
+on the revision you happen to have. `reply` carries a ≤400-character `result` — conclusion, what you
+ran to verify it, and the path of the long report, which goes into the segment and gets committed.
+
+## Gotchas
+
+- **Planner**: one commhub call per round (§1.1) — stop after dispatching, no waiting, no polling, no
+  second task in the same turn; ask first when a task is vague.
 - **Worker**: `get_inbox` → `ack` → `working` → `completion`, once per task; make `result` concrete
   and run lint/test before reporting when you can.
 - **Stalled state**: first check whether you rewrote/summarized `task` (matching is exact-equality) or
@@ -563,11 +661,25 @@ session status:
   around, `COMMHUB_URL` / `COMMHUB_TOKEN` bleed across; sanitize with
   `env -u COMMHUB_URL -u COMMHUB_TOKEN` or pass values explicitly, then re-run.
 - **MCP returns `401 unauthorized`**: check the token before blaming the hub — `anet whoami` or the
-  curl from §0.2 will tell you; with no token, **no** tool on `/mcp` is callable. Issuing / expiring
-  (idle timeout) / revoking tokens, and "whose token is this", are in §0.1.1.
+  curl from §0.2 will tell you; with no token, **no** tool on `/mcp` is callable. Read
+  `references/token-operations.md` before issuing, expiring, or revoking tokens (revocation is a hard
+  delete, and "whose token is this" is only answerable from login metadata).
 - **Don't dispatch via the `anet` CLI**: `anet` has no `send_task` / `get_inbox` / `report_*`
   commands — the protocol lives on MCP only (§0.3).
 - **A node card shows task text that reads like half a sentence / carries stray newlines**: the hub is
   not broken — `sessions.task` keeps the first 200 characters and cuts **blindly** (no
   sentence/newline awareness). Put a one-line summary on line 1 when dispatching (§1, "First line is
   a one-line summary"); the body is always intact in `get_inbox` / `get_task`.
+- **You fired several commhub calls in one round**: the symptoms are a session row whose task preview
+  is the wrong task, a `duplicate_send` from the dedupe window, a report that lands on a task you did
+  not mean, and no idea which of the calls did it. There is no undo — read the hub state
+  (`get_task`, one call, one round), then continue strictly one call per round (§1.1).
+- **The `task` parameter is a wall of text** (a pasted spec, a code block, a 2000-character brief):
+  the node card is truncated, the worker's byte-exact echo of it drifts, the task dies in `acked`,
+  and both sides pay for it in output tokens twice per round. Fix: move the text into a payload file,
+  split it into `## seg-NN`, dispatch a 4-line pointer built by `bash scripts/anet_payload.sh compose`,
+  and repair the stalled task with `cancel_task` + `retry_task` (§3).
+- **The pointer names a file the worker cannot open**: the file was untracked, uncommitted, unpushed,
+  or the segment sha12 does not match. `bash scripts/anet_payload.sh compose` refuses to build such a body, and
+  `verify` refuses to work from it; the worker reports the conflict in `result` (never works on a
+  guess). Push the branch, or ship it as a hub attachment with its `file_id` (§4).

@@ -1,0 +1,30 @@
+{
+  "scenario": "short-pointer-payload",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:acked",
+    "status:running",
+    "status:replied"
+  ],
+  "verdicts": [
+    "body <n> chars, summary line <n> chars"
+  ],
+  "checks": {
+    "payload_body_within_budget": true,
+    "payload_first_line_is_summary": true,
+    "payload_pointer_is_verifiable": true,
+    "payload_wrong_revision_is_refused": true,
+    "compose_refuses_long_summary": true,
+    "task_reaches_replied": true,
+    "result_stored_on_task_row": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

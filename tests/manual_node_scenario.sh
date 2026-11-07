@@ -19,6 +19,14 @@
 #                                                             `dm` reaches the human
 #   terminal-refused register, dispatch, ack, working, reply,
 #                    then a second reply                     -> the second reply is refused
+#   short-pointer-payload the dispatched body is a 4-line pointer built by
+#                    scripts/anet_payload.sh (summary + file + seg + sha12), the
+#                    spec lives in a payload file segment; the scenario asserts
+#                    the stored body is within budget and carries no absolute
+#                    path, that the pointer verifies against the file, that a
+#                    wrong sha12 is refused, that an over-long summary is
+#                    refused, and that the short body round-trips byte-exactly
+#                    through acked -> running -> replied
 #
 # The result JSON is: {"scenario", "ok", "final_status", "transitions": [...],
 #                      "verdicts": [...], "error": null}
@@ -30,6 +38,7 @@ set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$SKILL_DIR/scripts/anet_manual_node.sh"
+PAYLOAD_SH="$SKILL_DIR/scripts/anet_payload.sh"
 
 INPUT=""
 OUTPUT=""
@@ -150,6 +159,32 @@ check() { CHECKS="${CHECKS:+$CHECKS|}$1=$2"; }
 BODY="scenario body: first line
 second line, with punctuation & 特殊字符
 third line"
+PAYLOAD="commhub_tasks/r01/spec.md"
+if [ "$SCENARIO" = "short-pointer-payload" ]; then
+  # The long text is a file segment; the parameter is only a pointer at it.
+  mkdir -p "$PROJ/commhub_tasks/r01"
+  cat > "$PROJ/$PAYLOAD" <<'EOF'
+# 第 1 轮任务规格
+
+## seg-01 头三段配图
+生成 3 张暖金调佛像特写，提示词写回本段"产出"小节。
+验收: 3 张图入库 + 5 条提示词入库。
+
+## seg-02 中段配图
+生成 5 张。
+验收: 5 张图入库。
+EOF
+  (
+    cd "$PROJ" && git init -q . && printf '.anet/\n' > .gitignore && git add -A &&
+    git -c user.email=scenario@local -c user.name=scenario commit -qm "payload file"
+  ) || fail "could not create a git project for the payload file"
+  BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD)"
+  POINTER_JSON="$("$PAYLOAD_SH" compose --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
+      --summary "第1轮 seg-01：头三段配图，3 张暖金佛像特写入库" --branch "$BRANCH" --json 2>/dev/null)" \
+    || fail "anet_payload.sh compose refused a body it must accept: $POINTER_JSON"
+  BODY="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
+  [ -n "$BODY" ] || fail "compose produced no body text"
+fi
 TASK_ID="$(dispatch "$BODY")"
 record "dispatched"
 record_status "$TASK_ID"
@@ -513,6 +548,78 @@ PY
   check "chat_row_points_at_dm" true
   check "dm_reaches_the_human" true
   check "task_reaches_replied" true
+  check "stuck_task_is_diagnosed" false
+  check "terminal_task_refuses_second_reply" false
+  check "hijacked_task_is_refused" false
+  check "vanished_task_is_named" false
+  check "second_task_is_refused" false
+  write_result true
+  echo "scenario $SCENARIO ok (final status: $FINAL_STATUS)"
+  exit 0
+fi
+
+# ── short-pointer-payload: the parameter is a pointer, the spec is a file ──
+# The rule under test (SKILL.md §1.1, §1.2): the dispatched body stays short and
+# points at a payload-file segment; the worker verifies that pointer before it
+# works, and the short body is exactly what lets `working` echo it byte-for-byte
+# and flip the task acked -> running.
+if [ "$SCENARIO" = "short-pointer-payload" ]; then
+  STORED=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK_ID?network_id=$NET" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)['task']['content'])")
+  [ "${#STORED}" -le 300 ] || fail "the dispatched body is ${#STORED} chars (budget 300)"
+  FIRST_LINE="$(printf '%s\n' "$STORED" | head -1)"
+  [ "${#FIRST_LINE}" -le 80 ] || fail "line 1 is ${#FIRST_LINE} chars (budget 80)"
+  record_verdict "$(printf '%s' "body ${#STORED} chars, summary line ${#FIRST_LINE} chars" | sed -E 's/[0-9]+/<n>/g')"
+
+  case "$STORED" in
+    */home/*|*'/vol1/'*|*'~/'*|*'C:\'*) fail "the body carries an absolute path (§4 forbids it)" ;;
+  esac
+  case "$STORED" in
+    *"file: $PAYLOAD"*) ;;
+    *) fail "the body does not point at the payload file: $STORED" ;;
+  esac
+  SHA_BODY="$(printf '%s' "$STORED" | python3 -c 'import re,sys;m=re.search(r"sha12:\s*([0-9a-f]{12})", sys.stdin.read());print(m.group(1) if m else "")')"
+  [ -n "$SHA_BODY" ] || fail "the body carries no sha12: $STORED"
+
+  # the pointer is verifiable against the file the worker pulled
+  "$PAYLOAD_SH" verify --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
+    --sha12 "$SHA_BODY" >"$WORK/verify.log" 2>&1 \
+    || fail "verify refused the revision the pointer names: $(tail -2 "$WORK/verify.log")"
+  # a wrong revision is refused, so a worker never works on a guess
+  if "$PAYLOAD_SH" verify --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
+       --sha12 000000000000 >"$WORK/verify-bad.log" 2>&1; then
+    fail "verify accepted a sha12 that does not match the file"
+  fi
+  # the guard that keeps the parameter short really fires
+  if "$PAYLOAD_SH" compose --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
+       --summary "$(python3 -c 'print("字"*81)')" >"$WORK/compose-long.log" 2>&1; then
+    fail "compose accepted an 81-character summary line"
+  fi
+
+  run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
+  record_status "$TASK_ID"
+  # `working` fetches the stored body and sends it back unchanged: with a short
+  # body the exact-equality match is reproducible, so the task flips to running
+  run working "$TASK_ID" 20 >/dev/null 2>&1 \
+    || fail "working failed, the short body did not match byte-for-byte"
+  record_status "$TASK_ID"
+  run reply "$TASK_ID" "seg-01 done: 3 images and 5 prompts stored" >"$WORK/reply.log" 2>&1 \
+    || fail "reply failed: $(tail -1 "$WORK/reply.log")"
+  record_status "$TASK_ID"
+  FINAL_STATUS="$(task_status "$TASK_ID")"
+  [ "$FINAL_STATUS" = "replied" ] || fail "the task did not reach replied (it is $FINAL_STATUS)"
+
+  RESULT=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK_ID?network_id=$NET" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)['task']['result'])")
+  case "$RESULT" in *"seg-01 done"*) ;; *) fail "the result was not stored on the task row" ;; esac
+
+  check "payload_body_within_budget" true
+  check "payload_first_line_is_summary" true
+  check "payload_pointer_is_verifiable" true
+  check "payload_wrong_revision_is_refused" true
+  check "compose_refuses_long_summary" true
+  check "task_reaches_replied" true
+  check "result_stored_on_task_row" true
   check "stuck_task_is_diagnosed" false
   check "terminal_task_refuses_second_reply" false
   check "hijacked_task_is_refused" false

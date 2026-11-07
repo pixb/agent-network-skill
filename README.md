@@ -58,7 +58,19 @@ universal `~/.agents/skills/`). Use `--platform <name>`, `--project`, `--path <d
 - Planner: `/agent-network-skill split the work and dispatch it to <worker-alias>`
 - Worker: `/skill:agent-network-skill`, then say "take a task"
 - Manual node: `/agent-network-skill the manual node got a task but nothing started, check it`
+- Short parameters: `/agent-network-skill the task body is too long, move it into a payload file`
 - Prerequisites, token tiers and the CLI/MCP split are in [SKILL.md](SKILL.md) §0
+
+Two rules shape every call (SKILL.md §1.1, §1.2): **one commhub call per round**, and **short
+parameters** — the long text lives in a payload file and the parameter carries only
+`file:` + `seg:` + `sha12:`:
+
+```bash
+./scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 \
+    --summary "第7轮 seg-01：头三段配图，3 张暖金佛像特写入库" --branch main   # planner
+./scripts/anet_payload.sh verify  --file commhub_tasks/r07/spec.md --seg seg-01 \
+    --sha12 54b3cd5aa536 --print-body                                        # worker
+```
 
 ## Contents
 
@@ -66,7 +78,10 @@ universal `~/.agents/skills/`). Use `--platform <name>`, `--project`, `--path <d
 |---|---|
 | [SKILL.md](SKILL.md) | The full protocol: connection and tokens, both role flows, state machine, parameter hard rules, the manual-node section, Gotchas |
 | [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: one node one slot, the four transitions, how a task can leave you, token rules, the online-vs-working diagnosis, failure modes |
+| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets, the `## seg-NN` segment format, the sha12, `compose` guards, the two handoff routes, failure modes |
+| [references/token-operations.md](references/token-operations.md) | Token operations: what idle-expires, how to identify a token, revocation, environment contamination, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `seg:` + `sha12:`), `verify` it on the worker side, `list` the segments |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |
 | [AGENTS.md](AGENTS.md) | Directory-level notes: purpose, triggers, contents, Gotchas |

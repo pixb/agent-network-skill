@@ -194,5 +194,44 @@ PLAN_INBOX=$(curl -s -H "Authorization: Bearer $PLANNER_NTOK" "$HUB/api/messages
 echo "   planner inbox rows: $PLAN_INBOX"
 [ "${PLAN_INBOX:-0}" -ge 1 ] || { echo "the planner never received the reply"; exit 1; }
 
+echo "== a pointer-style dispatch: short body, the spec lives in a payload file (§1.2)"
+PAYLOAD="commhub_tasks/e2e/spec.md"
+mkdir -p "$PROJ/commhub_tasks/e2e"
+cat > "$PROJ/$PAYLOAD" <<'EOF'
+# e2e 规格
+
+## seg-01 一批配图
+生成 3 张暖金调配图，提示词写回本段"产出"小节。
+验收: 3 张图入库。
+EOF
+(
+  cd "$PROJ" && git init -q . && printf '.anet/\n' > .gitignore && git add -A &&
+  git -c user.email=e2e@local -c user.name=e2e commit -qm "payload file"
+) || { echo "could not create a git project for the payload file"; exit 1; }
+BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD)"
+BODY4="$("$SKILL_DIR/scripts/anet_payload.sh" compose --project-root "$PROJ" --file "$PAYLOAD" \
+  --seg seg-01 --summary "e2e seg-01：3 张配图入库" --branch "$BRANCH" --json 2>/dev/null \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
+[ -n "$BODY4" ] || { echo "compose produced no body"; exit 1; }
+[ "${#BODY4}" -le 300 ] || { echo "the composed body is ${#BODY4} chars (budget 300)"; exit 1; }
+echo "   pointer body (${#BODY4} chars, one commhub call this round):"
+printf '%s\n' "$BODY4" | sed 's/^/     /'
+TASK4=$(python3 - "$HUB" "$UTOK" "$NET" "$BODY4" <<'PY'
+import json, sys, urllib.request
+hub, utok, net, body = sys.argv[1:5]
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": body, "network_id": net}).encode())
+print(json.load(urllib.request.urlopen(req))["task_id"])
+PY
+)
+run ack "$TASK4" >/dev/null
+run working "$TASK4" 10 >/dev/null
+[ "$(task_status "$TASK4")" = "running" ] || { echo "the short pointer body did not flip the task to running"; exit 1; }
+run reply "$TASK4" "seg-01 done: 3 images stored" >/dev/null
+[ "$(task_status "$TASK4")" = "replied" ] || { echo "expected replied"; exit 1; }
+echo "   short body round-tripped byte-exactly: acked -> running -> replied"
+
 echo
 echo "ALL E2E ASSERTIONS PASSED"

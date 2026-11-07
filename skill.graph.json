@@ -9,7 +9,7 @@
     {
       "id": "claude_plugin_plugin_json",
       "path": ".claude-plugin/plugin.json",
-      "sha256": "689485d8b69d684918579f580ebb06acd6f7e97306f73ca3f89ec23e965d3ad6",
+      "sha256": "b48b7d870ff593b93524f4b05d80972f39028c740aaa1d173fae075cfcf5a3cf",
       "type": "package_file"
     },
     {
@@ -21,13 +21,13 @@
     {
       "id": "agents_document",
       "path": "AGENTS.md",
-      "sha256": "2a2644f8543f0fb2059a415434d9fec05333491ba27c6f1ab85ed0e9d832d7ff",
+      "sha256": "165d1e47c8bc49c4de6e2cf2657e8dc46f78dc85df21605f4260d53aa20bf9be",
       "type": "companion_instruction"
     },
     {
       "id": "evolution_md",
       "path": "EVOLUTION.md",
-      "sha256": "71df8576bce7f1befc2df80f79d692a1cf27a046ddaecca7394682b6485ff25b",
+      "sha256": "49389e3b70a1614b88b5aed50e8ed27eea14e22e1b73a7ec8281adda538b7ad3",
       "type": "package_file"
     },
     {
@@ -39,31 +39,31 @@
     {
       "id": "readme_md",
       "path": "README.md",
-      "sha256": "c6a604cf08a8e907df167d072895cdca6e24ebe66169e1b7148183790949c23a",
+      "sha256": "fd0e77d1a58fc42e8ed4ad2dc0cad379a4432f11bdc2db13b10eab4e7480354b",
       "type": "package_file"
     },
     {
       "id": "skill_document",
       "path": "SKILL.md",
-      "sha256": "182665535b887c35aaf7756ff05270a87810b06d9d427742df8f82b24fd34f72",
+      "sha256": "6497a2fdd3af4ecc074a3207939ce6f285cfa742e687e00a91bfe503ad3a401d",
       "type": "instruction"
     },
     {
       "id": "verification_md",
       "path": "VERIFICATION.md",
-      "sha256": "5ae031740f418f41aa9dbeb131d1dab6adb5681b3a94a0d35e2cbaac8f533acb",
+      "sha256": "8b6a38194c91660d31216793541b6c41ff1f0c11079aaf8ddba6f36209a23b67",
       "type": "package_file"
     },
     {
       "id": "discovery_json",
       "path": "discovery.json",
-      "sha256": "d788c7ea01b97694d034b3e629cab5b4075d521d7cc1b962219a8352d43583fd",
+      "sha256": "8f821de9e486f9a238acb82067a57583ea74e35d302b7a5919e1acf95e25c829",
       "type": "package_file"
     },
     {
       "id": "evals_agent_network_skill_eval_md",
       "path": "evals/agent-network-skill.eval.md",
-      "sha256": "952595286c1b15fd3960be434b91b59e46b3aaf87b621ba5f89a26f11d73b4d7",
+      "sha256": "7559624ae13b89b66ec75db4e700eeb6edbe155c85e8d30cd7ee58f03ef2e395",
       "type": "eval_spec"
     },
     {
@@ -76,6 +76,18 @@
       "id": "case_1_input",
       "path": "evals/golden/case-1/input.json",
       "sha256": "d17a2156315bcd273e7f5360a2ec891fa8d8c3456edd3bf7defdc90a1a154f78",
+      "type": "golden_input"
+    },
+    {
+      "id": "case_12_expected",
+      "path": "evals/golden/case-12/expected.json",
+      "sha256": "7663eadc8f4e27d95de0ccf8e992e2f0243b6e3cf6324fc21748ab39cb08edb4",
+      "type": "expected_output"
+    },
+    {
+      "id": "case_12_input",
+      "path": "evals/golden/case-12/input.json",
+      "sha256": "e2b30bcc9a5f14ccc9f3548dc4d010866b5518eb82a5db299f447d58638711d2",
       "type": "golden_input"
     },
     {
@@ -133,9 +145,21 @@
       "type": "golden_input"
     },
     {
+      "id": "case_9_expected",
+      "path": "evals/golden/case-9/expected.json",
+      "sha256": "431fe8b0b68f12bfb3eb180ae65b966c474352905a7aa749a67ebdf3f69d9b8c",
+      "type": "expected_output"
+    },
+    {
+      "id": "case_9_input",
+      "path": "evals/golden/case-9/input.json",
+      "sha256": "b30c77fd30f9cc2be2d5ac2087dcad9d23afe65b66cf93a5ffa153bb9b55d68c",
+      "type": "golden_input"
+    },
+    {
       "id": "evals_pipeline_report_json",
       "path": "evals/pipeline-report.json",
-      "sha256": "bca66563c29c81d51d8c5d6b6487c6f098e1fa7110784a0becd0d9a857bf3266",
+      "sha256": "66718fafa7e2d555a9c15c6273a3a108940dc3f6f584fa9c75bffb66af9ebe4e",
       "type": "package_file"
     },
     {
@@ -153,13 +177,31 @@
     {
       "id": "references_manual_node_md",
       "path": "references/manual-node.md",
-      "sha256": "a8bf2ad17d997889f3ddb869715338143d8f4020edbc19a5c949dfb0e3f1dba5",
+      "sha256": "2b47460c752e5b5150e527e1ef2d44fb4b69658c365906c8ff82871006ee0691",
+      "type": "reference"
+    },
+    {
+      "id": "references_payload_files_md",
+      "path": "references/payload-files.md",
+      "sha256": "16e8488abeaa3e7ab2107bd76633fc01362a3443cb1e6f76210cc1600904535b",
+      "type": "reference"
+    },
+    {
+      "id": "references_token_operations_md",
+      "path": "references/token-operations.md",
+      "sha256": "505f092ea46385d37472a31806fc9872c8fabef4d8800fc1329f26381da28f2e",
       "type": "reference"
     },
     {
       "id": "scripts_anet_manual_node_sh",
       "path": "scripts/anet_manual_node.sh",
-      "sha256": "42649669bc7896847325d14a472a1b8ee2a776b92eb8682834edb81cef84856e",
+      "sha256": "30ea1c622a26eeb94dbd1aafb454c53e8da73ecb927d48e1bac398a7afd152bf",
+      "type": "script"
+    },
+    {
+      "id": "scripts_anet_payload_sh",
+      "path": "scripts/anet_payload.sh",
+      "sha256": "3d524eb8196f779a9b7e71d1f9697f5ff96993e9af05d3c4376650de3448d1bc",
       "type": "script"
     },
     {
@@ -195,13 +237,13 @@
     {
       "id": "tests_manual_node_e2e_sh",
       "path": "tests/manual_node_e2e.sh",
-      "sha256": "f3d9ae61c6779ceaafbf8aa96e5f2d5b6f836c2d42e855cfb0fc919e11aeafb6",
+      "sha256": "99c62a5ab06de84b9f44815093e2dc6e12db409e0579bdd3e28d66b84bff8976",
       "type": "package_file"
     },
     {
       "id": "tests_manual_node_scenario_sh",
       "path": "tests/manual_node_scenario.sh",
-      "sha256": "1c482ce467f426905aa5879f3e229f2ac7c1dae5ed6894822a8394c5e29a8c07",
+      "sha256": "d3b0bc4332ece677b632d03895ccdf84b34c49fe9ffb1f946046ef0a7d3ff64c",
       "type": "package_file"
     },
     {
@@ -231,19 +273,25 @@
     {
       "id": "wiki_index_md",
       "path": "wiki/index.md",
-      "sha256": "ff8db0bddf99128815a6d4ecc26c12f4d95b6c8cb05ac02696bdd9ce7e0dd753",
+      "sha256": "78c8d3823a1ce17a2037e19ddceb28ea3cf6d6917d05597d0e22e3e7920e73ee",
       "type": "package_file"
     },
     {
       "id": "wiki_logs_md",
       "path": "wiki/logs.md",
-      "sha256": "e95f791330b8702b1cd99d271e9f577738ebb7354863422de2338d5091fe7330",
+      "sha256": "5f09752e78f7edeada2e7736b41f53eaf3c7dc5a8c274be29b50caae4e33ec37",
+      "type": "package_file"
+    },
+    {
+      "id": "wiki_patterns_commhub_call_discipline_md",
+      "path": "wiki/patterns/commhub-call-discipline.md",
+      "sha256": "f905d5222135096d3e07812d7746d640d07d81d9fe04e34372a19550c87c6a66",
       "type": "package_file"
     },
     {
       "id": "wiki_skill_impact_md",
       "path": "wiki/skill-impact.md",
-      "sha256": "a79d68179ab12324404601d5a4360f8d6d77b5e22eb87f218b32d00a41334756",
+      "sha256": "f2206863109f0a969e3b5fe06899078fe926e8c7ed6ff2b3471858f6ceedeea1",
       "type": "package_file"
     }
   ],
@@ -262,6 +310,11 @@
     }
   ],
   "edges": [
+    {
+      "from": "case_12_input",
+      "relation": "consumed_by",
+      "to": "pipeline"
+    },
     {
       "from": "case_1_input",
       "relation": "consumed_by",
@@ -293,6 +346,16 @@
       "to": "pipeline"
     },
     {
+      "from": "case_9_input",
+      "relation": "consumed_by",
+      "to": "pipeline"
+    },
+    {
+      "from": "pipeline",
+      "relation": "compared_against",
+      "to": "case_12_expected"
+    },
+    {
       "from": "pipeline",
       "relation": "compared_against",
       "to": "case_1_expected"
@@ -316,6 +379,11 @@
       "from": "pipeline",
       "relation": "compared_against",
       "to": "case_6_expected"
+    },
+    {
+      "from": "pipeline",
+      "relation": "compared_against",
+      "to": "case_9_expected"
     }
   ],
   "gates": [
