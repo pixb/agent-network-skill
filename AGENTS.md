@@ -35,7 +35,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
 | [references/payload-files.md](references/payload-files.md) | Short parameters in depth: budgets, `## seg-NN` segment format, the sha12, `compose` guards, handoff routes, failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what expires, how to identify a token, revocation, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | Run this on the manual node's machine: register, heartbeat, inbox, ack, working, reply, check |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and verify it: `compose`, `verify`, `list` |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and prove it: `compose`, `verify`, `guard`, `list` |
 | [scripts/run_evals.py](scripts/run_evals.py) | The eval runner: `python3 scripts/run_evals.py` gates the skill's behaviour |
 | [evals/](evals/) | The eval spec and its golden cases (real hubs, real tasks) |
 | [tests/](tests/) | The same scenarios run end to end, narrated |
@@ -45,11 +45,15 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
 - **One commhub call per round.** A turn that fires `get_inbox` + `ack` + `working`, or three
   `send_task`s at once, is not "efficient": it overwrites the node's single session slot, it burns
   the dedupe window, and it leaves you with three responses and no idea which transition the hub
-  took. Read one response, then act (§1.1).
-- **The `task` / `message` parameter is a pointer, not the document.** ≤300 characters, line 1
+  took. Read one response, then act (§1.1). A script command that performs **one transition** is one
+  round even when it reads the hub before and after it (`anet_manual_node.sh working` fetches the
+  stored body so the echo is byte-exact, then proves the task reached `running`) — the rule counts
+  transitions, not shell characters.
+- **The `task` / `message` parameter is a pointer, not the document.** ≤300 characters, ≤6 lines, line 1
   ≤80; the spec goes in a payload file split into `## seg-NN`, and the parameter names
   `file:` + `seg:` + `sha12:`. Build it with `scripts/anet_payload.sh compose`, verify it on the
-  worker side with `verify` (§1.2).
+  worker side with `verify`, audit an existing body with `guard` (§1.2). The budgets are counted in
+  characters by python, never bytes by the shell — a C locale must not silently triple a CJK body.
 - **Online is not working.** A manual node with a healthy heartbeat and `sessions.status = idle`
   looks exactly like a node doing nothing while its task sits untouched. Read the task row, never the
   session row.

@@ -1,4 +1,3 @@
 {
-  "scenario": "dm-visible-to-manager",
-  "hub_source": "/vol1/1000/docker/nec8-docker/agent-network/server"
+  "scenario": "dm-visible-to-manager"
 }

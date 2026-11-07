@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.0
+  version: 0.6.1
   created: 2026-10-07
-  last_reviewed: 2026-11-07
+  last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.0
+  version: 0.6.1
   created: 2026-10-07
 ---
 
@@ -157,8 +157,8 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
    - One call per task **and one commhub call per round**: `send_task(alias=<worker-alias>,
      task=<short body>, context=<one line>, priority=<high|normal|low>, ttl_seconds=<default 3600,
      86400 for long jobs>)`. N tasks = N rounds, not N calls.
-   - The body is a **pointer**: a one-line summary plus `file:` / `seg:` / `sha12:` (§1.2). Compose
-     Run `bash scripts/anet_payload.sh compose` to build it; the spec text stays in the payload file.
+   - The body is a **pointer**: a one-line summary plus `file:` / `seg:` / `sha12:` (§1.2). Build it
+     with `bash scripts/anet_payload.sh compose`; the spec text stays in the payload file.
    - Use `parent_task_id` to chain only changes that affect each other.
    - **Stop after dispatching**: the round ends with the dispatch. Don't also poll, don't also check
      status, don't also dispatch the next task — the recipient is an asynchronous AI; wait for its
@@ -174,11 +174,19 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
 
 ### 1.1 One commhub call per round (hard rule)
 
-**A round = one of your turns. In one round you issue at most one CommHub MCP call.** Every tool
-counts, read-only included: `send_task`, `get_task`, `list_tasks`, `get_all_status`,
-`get_completions`, `get_inbox`, `ack_inbox`, `report_status`, `report_completion`, `send_message`,
-`broadcast`, `requirements_*`. A codemode script, a shell loop, a parallel tool-call batch, or
-"dispatch three independent tasks at once" is **one round** and gets no exemption.
+**A round = one of your turns. In one round you move the hub's state at most once.** For an agent
+talking MCP directly that means **at most one CommHub call**: every tool counts, read-only included
+(`send_task`, `get_task`, `list_tasks`, `get_all_status`, `get_completions`, `get_inbox`,
+`ack_inbox`, `report_status`, `report_completion`, `send_message`, `broadcast`, `requirements_*`). A
+codemode script, a shell loop, a parallel tool-call batch, or "dispatch three independent tasks at
+once" is **one round** and gets no exemption.
+
+**What is not a second round.** A script command that performs **one transition** may read the hub
+around that transition: `scripts/anet_manual_node.sh working` fetches the stored body (so the echo
+can be byte-exact), acks a `delivered` task on the way in, sends `report_status`, then re-reads the
+task to prove it reached `running`. That is one round, not four — the reads exist to make the single
+transition provable, and the script is deterministic, so the operator still knows which transition
+moved what. The rule bans *you* deciding to fire several calls for several purposes in one turn.
 
 | role | round N | round N+1 |
 |---|---|---|
@@ -190,8 +198,10 @@ counts, read-only included: `send_task`, `get_task`, `list_tasks`, `get_all_stat
 Why it is protocol and not style: a batch is **undiagnosable** (three responses, and every repair in
 §3 hinges on which call moved which state); a node has **one session slot**, so parallel dispatch
 overwrites the preview and the first task vanishes from the node's status view (§7);
-`report_completion` is **once per task**, so a batch of reports lands on none of them; the recipient
-is **asynchronous**, so a second dispatch written before its completion is written blind; the dedupe
+`report_completion` updates a task row only while that row is `delivered`/`acked`/`running`, so a
+second report on the same task changes nothing in `tasks` while it still appends a row to
+`completions`, and one report naming several tasks matches none of them; the recipient is
+**asynchronous**, so a second dispatch written before its completion is written blind; the dedupe
 window punishes the re-send habit a batch starts. Local work is free between rounds (`read`, `write`,
 git, bash, and `bash scripts/anet_payload.sh`); commhub calls are the scarce resource.
 
@@ -207,8 +217,8 @@ default — split into `## seg-NN <title>` anchors, **one segment per task**; th
 pointer at one segment:
 
 ```text
-第7轮 seg-01：头三段配图，3 张暖金佛像特写入库
-file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 54b3cd5aa536
+第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
 branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
 report_completion once, result <= 400 chars
 ```
@@ -216,19 +226,24 @@ report_completion once, result <= 400 chars
 `sha12` = the first 12 hex characters of the sha256 of the segment text: it names the revision the
 worker must read. Build the body mechanically — run
 `bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 --summary
-"第7轮 seg-01：头三段配图，3 张暖金佛像特写入库" --branch main`, which prints the exact `task` text
-and refuses a >80-character summary, a >300-character body, a code block, an absolute path, and a
-payload file that is untracked, uncommitted, or unpushed (the worker pulls the branch; it cannot read
-your disk). Worker side: run `bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first;
-a non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never
-work on a guess.
+"第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
+and refuses a >80-character summary, a >300-character body, a >6-line body, a code block, an absolute
+path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
+uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
+`bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
+file, missing segment, sha12 mismatch) means **report the conflict**, never work on a guess. Auditing
+a body you already have (a hub row, a draft) is `bash scripts/anet_payload.sh guard --body "…"`, the
+same rule from the same place.
 
 Why it is correctness, not cosmetics: `sessions.task` keeps the first 200 characters cut blindly (the
 node card, `get_all_status`, `/api/status`), and `report_status(status="working")` matches the body
 **byte-for-byte** — a long body is a long thing for the worker to reproduce without drifting, and a
-drift rots the task in `acked` (§3). Self-containment still holds: goal, steps and acceptance
-criteria live **inside the named segment**. Read `references/payload-files.md` for the segment
-format, the guards, the handoff routes and the failure modes.
+drift rots the task in `acked` (§3). The default 4-line pointer is 240-280 characters, so the preview
+holds line 1 and the `file:`/`seg:`/`sha12:` line (they end near character 95) and cuts the tail of
+line 3 — the part the card must carry is at the front, which is the point. Self-containment still
+holds: goal, steps and acceptance criteria live **inside the named segment**. Read
+`references/payload-files.md` for the segment format, the guards, the handoff routes and the failure
+modes.
 
 **Hard rules for the task body** (get these wrong and the worker will build the wrong thing):
 
@@ -247,8 +262,9 @@ format, the guards, the handoff routes and the failure modes.
 - **First line is a one-line summary** (this is what the dashboard node card shows): line 1 is a
   ≤80-character summary that **stands as a complete sentence**, because `sessions.task` keeps only the
   **first 200 characters** of the body, cut **blindly** — no sentence and no newline awareness — and
-  the dashboard card, `get_all_status` and `/api/status` all read that column. A 4-line pointer fits
-  inside it; a paste at the front is what produces a half-sentence card. The full body stays intact in
+  the dashboard card, `get_all_status` and `/api/status` all read that column. A 4-line pointer puts
+  the summary and the `file:`/`seg:`/`sha12:` line inside that preview (they end near character 95);
+  a paste at the front is what produces a half-sentence card. The full body stays intact in
   `get_inbox` / `get_task`, and the worker is unaffected: `report_status(status="working", task=…)`
   must still pass **the complete original text** (only an exact match moves the task to `running`).
 - **No absolute paths** (§4).
@@ -355,10 +371,12 @@ paths:
 - **The hub never needs to know any project path**: dispatch is by `alias` only; the worker's runtime
   works in **its own working directory** (the cwd at node creation). Paths are each machine's local
   fact.
-- **No absolute paths**: task bodies and delivery notes must not contain `/home/...`, `C:\...` or
-  `~/...`; don't copy them out of `get_all_status`'s `project_dir` either (that is a stale reported
-  value that dies the moment the machine changes). Point at locations as "in your working directory"
-  plus a relative path (e.g. `src/game.js`).
+- **No absolute paths**: a parameter must not carry a path a second machine cannot open — any token
+  starting with `/` (POSIX absolute), `~/`, a drive path `X:\` or `X:/`, or a UNC share
+  `\\host\share`. `scripts/anet_payload.sh guard --body "…"` names them by shape, so the rule does
+  not depend on any one machine's mount prefix. Don't copy paths out of `get_all_status`'s
+  `project_dir` either (that is a stale reported value that dies the moment the machine changes).
+  Point at locations as "in your working directory" plus a relative path (e.g. `src/game.js`).
 - **No cross-directory assumptions**: never read files in "the other side's directory" to judge their
   progress or result.
 - **Delivery has exactly two routes**: git push/pull, or a hub attachment — `POST /api/upload` to get
@@ -623,10 +641,12 @@ session status:
 
 ### 7.4 One command per round; the body you receive is a pointer
 
-Every command in §7 is a commhub call, so it is **one round** (§1.1): `inbox && ack && working &&
-reply` on one shell line is four calls in one round — the node's single session slot gets overwritten,
-and if one of them fails you have four responses and no idea which transition the hub took. Run one,
-read its verdict, run the next in the next round.
+Each command in §7 moves **one transition**, so one command is one round (§1.1). `working` and
+`reply` read the hub around that transition (fetch the stored body, prove the status landed) — that
+is part of the same round, not extra calls. What is banned is chaining transitions: `inbox && ack &&
+working && reply` on one shell line is four transitions in one round — the node's single session slot
+gets overwritten, and if one of them fails you have four responses and no idea which transition the
+hub took. Run one command, read its verdict, run the next in the next round.
 
 The dispatched body is normally a 4-line pointer (`file:` / `seg:` / `sha12:`, §1.2). `working`
 fetches that body from the hub (never retype it), and the human works the **file**: run
@@ -673,7 +693,9 @@ ran to verify it, and the path of the long report, which goes into the segment a
 - **You fired several commhub calls in one round**: the symptoms are a session row whose task preview
   is the wrong task, a `duplicate_send` from the dedupe window, a report that lands on a task you did
   not mean, and no idea which of the calls did it. There is no undo — read the hub state
-  (`get_task`, one call, one round), then continue strictly one call per round (§1.1).
+  (`get_task`, one call, one round), then continue strictly one call per round (§1.1). The script
+  commands of §7 are exempt from that count only for the reads that make their single transition
+  provable (§1.1, "What is not a second round").
 - **The `task` parameter is a wall of text** (a pasted spec, a code block, a 2000-character brief):
   the node card is truncated, the worker's byte-exact echo of it drifts, the task dies in `acked`,
   and both sides pay for it in output tokens twice per round. Fix: move the text into a payload file,

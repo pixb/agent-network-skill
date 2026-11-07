@@ -194,17 +194,19 @@ says. `>= 1` means the card shows online.
 
 ## One command per round; the body you receive is a pointer
 
-Every command above is one commhub call, so it is **one round** (SKILL.md §1.1). `inbox && working &&
-reply` on a single shell line is three commhub calls in one round: the node has one session slot, so
-the middle one overwrites the preview of the first, and if one of the three fails you are left with
-three responses and no way to tell which transition the hub took. Run one, read its verdict, run the
-next one in the next round.
+Each command above moves **one transition**, so it is **one round** (SKILL.md §1.1). What is banned
+is chaining transitions: `inbox && working && reply` on a single shell line is three transitions in
+one round — the node has one session slot, so the middle one overwrites the preview of the first, and
+if one of the three fails you are left with three responses and no way to tell which transition the
+hub took. The reads `working` and `reply` do around their own transition (fetch the stored body, re-read
+the task to prove it moved) belong to that round and are not extra calls. Run one command, read its
+verdict, run the next one in the next round.
 
 The task a manual node receives is normally a 4-line pointer (SKILL.md §1.2):
 
 ```text
-第7轮 seg-01：头三段配图，3 张暖金佛像特写入库
-file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 54b3cd5aa536
+第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
 branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
 report_completion once, result <= 400 chars
 ```
@@ -213,7 +215,7 @@ So the human side of the job is: `git pull`, then prove the pointer with the sib
 
 ```bash
 scripts/anet_payload.sh verify --file commhub_tasks/r07/spec.md --seg seg-01 \
-    --sha12 54b3cd5aa536 --print-body
+    --sha12 3f7c64c57fb6 --print-body
 ```
 
 - a mismatch (or a missing segment) is a **conflict**: run `working`, then say so in `reply` — never

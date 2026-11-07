@@ -31,9 +31,10 @@ python3 scripts/run_evals.py --validate # check the spec shape only
 bash tests/manual_node_e2e.sh           # the same scenarios, narrated end to end
 ```
 
-The scenarios need the commhub-server source tree to boot a throwaway hub from.
-Point `ANET_E2E_HUB_SRC` at it, or put the path in each scenario file's
-`hub_source` field.
+The scenarios need the commhub-server source tree to boot a throwaway hub from. Point
+`ANET_E2E_HUB_SRC` at it (the `server/` directory, or the repo root that contains it). When this skill
+sits where it ships — `<repo>/.agents/skills/agent-network-skill` — the tree is found relative to the
+skill directory, so **golden inputs carry no paths** and the suite runs on any clone on any machine.
 
 ## Criteria
 

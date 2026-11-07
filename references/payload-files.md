@@ -32,7 +32,9 @@ the repo, and the same pointer keeps working after `retry_task`.
 | `report_completion(result=…)` | ≤ 400 characters (the row stores 4000; do not use them all) |
 
 Never inside a parameter: a markdown spec, a code block, a log, a diff, a table, the content of a
-file, an absolute path (`/home/…`, `C:\…`, `~/…`).
+file, or a path the other machine cannot open — by shape: a leading `/` (POSIX absolute), `~/`, a
+drive path `X:\` / `X:/`, or a UNC share `\\host\share`. `scripts/anet_payload.sh guard` names them
+by shape, so the rule never encodes one machine's mount prefix.
 
 ## Payload file and segment format
 
@@ -43,15 +45,15 @@ Default location (any project-relative directory works; name it in the body):
 Split it into segments with an anchor heading:
 
 ```markdown
-# 第 7 轮配图任务
+# 第 7 轮：导出模块
 
-## seg-01 头三段配图
-生成 3 张暖金调佛像特写，提示词写回本段"产出"小节。
-验收: 3 张图 + 5 条提示词入库。
+## seg-01 给导出函数补单元测试
+为 exportRows() 补 3 个用例，覆盖空输入、单行、超长行。
+验收: 3 个用例全绿，失败时报错指向具体行号。
 
-## seg-02 中段配图
-生成 5 张中景，同样写回"产出"小节。
-验收: 5 张图入库。
+## seg-02 更新使用文档
+把 exportRows() 的参数与默认值写进 docs/guide.md。
+验收: 文档构建通过，示例可复制运行。
 ```
 
 Rules the tooling depends on:
@@ -69,14 +71,16 @@ Rules the tooling depends on:
 ## The pointer body (four lines)
 
 ```text
-第7轮 seg-01：头三段配图，3 张暖金佛像特写入库
-file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 54b3cd5aa536
+第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
 branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
 report_completion once, result <= 400 chars
 ```
 
-Line 1 is the one-line summary (≤80 chars, a complete sentence, and the first 200 characters of the
-body therefore read as a sentence — the dashboard card shows exactly that).
+Line 1 is the one-line summary (≤80 chars, a complete sentence). This body is 258 characters, so
+`sessions.task` — which keeps the first 200, cut blindly — shows line 1, the whole
+`file:`/`seg:`/`sha12:` line (it ends near character 95) and the head of line 3: the part a reader
+needs is inside the cut, and the tail is not.
 
 A pointer is **not** an excuse for a vague task: the goal, the steps and the acceptance criteria all
 live **inside the named segment**, and the body names the file, the segment, and the acceptance line.
@@ -89,16 +93,24 @@ Run it (bash + python3; it is local, so it does not spend the round):
 # planner — prints the exact text to pass as send_task(task=…)
 bash scripts/anet_payload.sh compose \
     --file commhub_tasks/r07/spec.md --seg seg-01 \
-    --summary "第7轮 seg-01：头三段配图，3 张暖金佛像特写入库" \
+    --summary "第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" \
     --branch main
 
 # worker — proves the pointer before touching anything (non-zero exit = conflict)
 bash scripts/anet_payload.sh verify \
-    --file commhub_tasks/r07/spec.md --seg seg-01 --sha12 54b3cd5aa536 --print-body
+    --file commhub_tasks/r07/spec.md --seg seg-01 --sha12 3f7c64c57fb6 --print-body
 
 # both — what is in the file
 bash scripts/anet_payload.sh list --file commhub_tasks/r07/spec.md
+
+# anyone — audit a body you already have (a hub row, a draft) against the same rule
+bash scripts/anet_payload.sh guard --body "$(printf '%s' "$TASK_BODY")"
 ```
+
+`--json` on `compose` gives `{body, chars, lines, first_line_chars, file, seg, sha12,
+segment_chars}`; on `guard` it gives `{ok, chars, lines, first_line_chars, max_chars,
+first_line_max, violations}`. Every count is made in python, so a C locale — which counts bytes and
+would read a 90-character Chinese body as 270 — cannot change the verdict.
 
 `--json` gives `{body, chars, lines, first_line_chars, file, seg, sha12, segment_chars}`.
 
@@ -106,10 +118,11 @@ bash scripts/anet_payload.sh list --file commhub_tasks/r07/spec.md
 
 `compose` refuses, and says why:
 
-- a summary line over 80 characters;
-- a composed body over `--max` (default 300);
+- a summary line over 80 characters (`--summary-max`);
+- a composed body over `--max` (default 300) or over 6 lines;
 - a body containing a code block (the code belongs in the file);
-- an absolute path, a `~/` path, or a path escaping the working directory;
+- a path the other machine cannot open: a leading `/`, a `~/` path, a `X:\` drive path, a
+  `\\host\share` UNC path, or a payload path that escapes the working directory;
 - a payload file that is **not in git** (the other machine pulls the branch — it cannot read your
   disk); pass `--allow-untracked` only when you will ship it as a hub attachment;
 - a payload file with **uncommitted changes** (`--allow-dirty` to override);
@@ -117,7 +130,8 @@ bash scripts/anet_payload.sh list --file commhub_tasks/r07/spec.md
 
 `verify` refuses (exit 3) when the file is missing, the segment anchor is missing, or the sha12 does
 not match. Exit 3 is the signal to **report the conflict**, never to work on the revision you happen
-to have.
+to have. `guard` exits 2 when a body breaks the budget, and `compose` refuses the same list, so the
+tests and the humans read the rule from one place.
 
 ## Handoff routes (cross-machine)
 

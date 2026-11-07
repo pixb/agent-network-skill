@@ -26,6 +26,12 @@
 #       the task pointed at; exits non-zero when they are not
 #   anet_payload.sh list    --file <relpath> [--json]
 #       segment ids, titles and character counts
+#   anet_payload.sh guard   --body "<text>" [--max 300] [--summary-max 80] [--json]
+#       audit a body you already have (a hub row, a draft): char/line budget, first
+#       line budget, code block, absolute path. It is the same rule the compose
+#       guards apply, so a test can assert the rule against a stored body without
+#       duplicating the pattern — and it counts characters in python, so a C locale
+#       cannot turn a 100-character Chinese body into a 300-byte one.
 #
 # segment convention (in the payload file):
 #   ## seg-01 <title>
@@ -34,8 +40,14 @@
 # segment text = the anchor line through the line before the next anchor, with
 # trailing blanks stripped; sha12 = first 12 hex chars of sha256(segment text).
 #
+# absolute path = a path a second machine cannot open: a leading `/` token, a `~/`
+# token, a `X:\` drive path, or a `\\host\share` UNC path. Named generically, so no
+# particular server's mount prefix is encoded in the rule. URLs are not paths here.
+#
 # options:
 #   --project-root <dir>  repo that holds the payload file (default: $PWD)
+#   --max <n>            body budget in characters (default 300)
+#   --summary-max <n>    first-line budget in characters (default 80)
 #   --allow-dirty         do not refuse a file with uncommitted changes
 #   --allow-untracked     do not refuse a file that is not in git
 #   --force               compose even when a guard rejects the body
@@ -47,9 +59,16 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; }
-die() { echo "$SCRIPT_NAME: $*" >&2; exit "${2:-2}"; }
+usage() { awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; }
+# The exit code is the SECOND argument and must never reach the message: an earlier
+# version used $*, so `die "no segment seg-09" 2` printed “no segment seg-09 2” and a
+# log assertion written against the sentence never matched it.
+die() { echo "$SCRIPT_NAME: $1" >&2; exit "${2:-2}"; }
 warn() { echo "$SCRIPT_NAME: $*" >&2; }
+
+# Character counts come from python, never from ${#var}: in a non-UTF-8 locale bash
+# counts BYTES, and a CJK body then measures ~3x what the spec budgets.
+nchars() { python3 -c 'import sys; print(len(sys.argv[1]))' "$1"; }
 
 CMD="${1:-}"
 [ -n "$CMD" ] || die "no command given (see --help)"
@@ -57,6 +76,7 @@ case "$CMD" in -h|--help|help) usage; exit 0 ;; esac
 shift
 
 FILE="" SEG="" SUMMARY="" ACCEPT="" DELIVER="" BRANCH="" MAX="300"
+BODY_ARG="" SUMMARY_MAX="80"
 SHA12="" PROJECT="${ANET_PAYLOAD_PROJECT:-$PWD}"
 JSON=0 PRINT_BODY=0 ALLOW_DIRTY=0 ALLOW_UNTRACKED=0 FORCE=0
 
@@ -69,6 +89,8 @@ while [ $# -gt 0 ]; do
     --deliver) DELIVER="${2:-}"; shift 2 ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --max) MAX="${2:-}"; shift 2 ;;
+    --summary-max) SUMMARY_MAX="${2:-}"; shift 2 ;;
+    --body) BODY_ARG="${2:-}"; shift 2 ;;
     --sha12) SHA12="${2:-}"; shift 2 ;;
     --project-root) PROJECT="${2:-}"; shift 2 ;;
     --json) JSON=1; shift ;;
@@ -81,14 +103,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$FILE" ] || die "compose/verify/list need --file <relpath>"
-case "$FILE" in
-  /*) die "the payload path must be relative (no absolute path in a task body): $FILE" ;;
-  '~'*|*'/../'*|../*) die "the payload path must stay inside the working directory: $FILE" ;;
-esac
-case "$FILE" in *$'\n'*) die "the payload path cannot contain a newline" ;; esac
-FULL="$PROJECT/$FILE"
-[ -f "$FULL" ] || die "no such payload file: $FILE (relative to $PROJECT)"
+if [ "$CMD" != "guard" ]; then
+  [ -n "$FILE" ] || die "compose/verify/list need --file <relpath>"
+  case "$FILE" in
+    /*) die "the payload path must be relative (no absolute path in a task body): $FILE" ;;
+    '~'*|*'/../'*|../*) die "the payload path must stay inside the working directory: $FILE" ;;
+  esac
+  case "$FILE" in *$'\n'*) die "the payload path cannot contain a newline" ;; esac
+  FULL="$PROJECT/$FILE"
+  [ -f "$FULL" ] || die "no such payload file: $FILE (relative to $PROJECT)"
+fi
+FULL="${FULL:-}"   # guard audits a body and never reads a payload file
 
 py() {
 python3 - "$FULL" "$SEG" "$SHA12" <<'PY'
@@ -178,10 +203,88 @@ PY
 git_get() { python3 -c "import json,sys;print(json.loads(sys.argv[1]).get(sys.argv[2],''))" "$GIT_STATE" "$1"; }
 
 # ── segment facts (used by every command) ─────────────────────────────────
-META="$(py)" || die "could not read the payload file"
+if [ "$CMD" = "guard" ]; then META="{}"; else META="$(py)" || die "could not read the payload file"; fi
 SEG_JSON() { python3 -c "import json,sys;d=json.loads(sys.argv[1]);v=d.get(sys.argv[2],'');print(v if isinstance(v,str) else json.dumps(v,ensure_ascii=False))" "$META" "$1"; }
 
+# ── the body-shape rule, shared by compose and guard ─────────────────────
+# Prints one line per violation; empty output means the body passes.
+body_violations() {
+  python3 - "$1" "${MAX:-300}" "${SUMMARY_MAX:-80}" <<'PY'
+import re, sys
+body, max_chars, max_first = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+lines = body.split("\n")
+violations = []
+if len(body) > max_chars:
+    violations.append(f"the body is {len(body)} chars (budget {max_chars}) — the long text belongs in the file, not in the parameter")
+if len(lines) > 6:
+    violations.append(f"the body is {len(lines)} lines (budget 6)")
+if lines and len(lines[0]) > max_first:
+    violations.append(f"line 1 is {len(lines[0])} chars (budget {max_first}): sessions.task keeps only the first 200 chars and cuts blindly")
+if '```' in body:
+    violations.append("the body contains a code block — code belongs in the payload file")
+# Token classification, not a pattern that can catch the tail of a URL: a path counts
+# when a whitespace-separated token — punctuation stripped — starts with `/` (POSIX
+# absolute), `~/` (home-relative), `X:\` or `X:/` (Windows drive) or `\\host\` (UNC).
+# Named by shape, so no particular server's mount prefix is encoded in the rule.
+def classify(raw):
+    token = raw.strip("()[]{}<>,;:'\"")
+    if not token:
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", token):
+        return "Windows drive path"
+    if token.startswith("\\\\"):
+        return "UNC path"
+    if token.startswith("~/"):
+        return "home-relative path (~/)"
+    if token.startswith("//"):
+        return None  # protocol-relative URL, not a path
+    if token.startswith("/"):
+        return "absolute path"
+    return None
+
+for raw in re.split(r"[\s;]+", body):
+    label = classify(raw)
+    if label:
+        violations.append(
+            "the parameter carries a path the other machine cannot open — "
+            f"{label}: {raw.strip('()[]{}<>,;:\'"')} (§4 forbids absolute paths)"
+        )
+
+seen = set()
+for item in violations:
+    if item not in seen:
+        seen.add(item)
+        print(item)
+PY
+}
+
 case "$CMD" in
+  guard)
+    [ -n "${BODY_ARG:-}" ] || die "guard needs --body \"<text>\""
+    PROBLEMS="$(body_violations "$BODY_ARG")" || die "guard could not audit the body"
+    CHARS="$(nchars "$BODY_ARG")"
+    LINES="$(printf '%s' "$BODY_ARG" | python3 -c 'import sys; print(len(sys.stdin.read().split("\n")))')"
+    FIRST="$(printf '%s' "$BODY_ARG" | head -1 | python3 -c 'import sys; print(len(sys.stdin.read().rstrip("\n")))')"
+    if [ "$JSON" = 1 ]; then
+      python3 - "$CHARS" "$LINES" "$FIRST" "$MAX" "$SUMMARY_MAX" "$PROBLEMS" <<'PY'
+import json, sys
+chars, lines, first, max_chars, max_first, problems = sys.argv[1:7]
+print(json.dumps({
+    "ok": not problems,
+    "chars": int(chars), "lines": int(lines), "first_line_chars": int(first),
+    "max_chars": int(max_chars), "first_line_max": int(max_first),
+    "violations": [line for line in problems.split("\n") if line],
+}, ensure_ascii=False, indent=2))
+PY
+      [ -z "$PROBLEMS" ] && exit 0 || exit 2
+    fi
+    if [ -n "$PROBLEMS" ]; then
+      printf '%s\n' "$PROBLEMS" | sed "s/^/$SCRIPT_NAME: /"
+      exit 2
+    fi
+    echo "body ok: $CHARS chars, $LINES lines, $FIRST on line 1"
+    exit 0
+    ;;
   list)
     if [ "$JSON" = 1 ]; then echo "$META"; exit 0; fi
     N="$(SEG_JSON segments | python3 -c "import json,sys;print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)"
@@ -248,8 +351,8 @@ if [ "$(SEG_JSON duplicate_anchor)" = "true" ]; then warn "segment $SEG appears 
 
 SEGSHA="$(SEG_JSON sha12)"
 SEGCHARS="$(SEG_JSON chars)"
-SUMCHARS="${#SUMMARY}"
-[ "$SUMCHARS" -le 80 ] || die "the summary line is $SUMCHARS chars (max 80): sessions.task keeps only the first 200 chars and cuts blindly"
+SUMCHARS="$(nchars "$SUMMARY")"
+[ "$SUMCHARS" -le "$SUMMARY_MAX" ] || die "the summary line is $SUMCHARS chars (max $SUMMARY_MAX): sessions.task keeps only the first 200 chars and cuts blindly"
 
 ACCEPT="${ACCEPT:-accept: every item on the segment acceptance list}"
 DELIVER="${DELIVER:-report_completion once, result <= 400 chars}"
@@ -271,11 +374,11 @@ print("\n".join(lines))
 PY
 )"
 
-[ ${#BODY} -le "$MAX" ] || die "the composed body is ${#BODY} chars (max $MAX) — the long text belongs in the file, not in the parameter${FORCE:+; pass --force to override}"
-case "$BODY" in
-  *'```'*) die "the body contains a code block — code belongs in the payload file" ;;
-  */home/*|*'/vol1/'*|*'~/'*|*'C:\'*) die "the body contains an absolute path (§4 forbids it)" ;;
-esac
+BODY_PROBLEMS="$(body_violations "$BODY")"
+if [ -n "$BODY_PROBLEMS" ] && [ "$FORCE" != 1 ]; then
+  printf '%s\n' "$BODY_PROBLEMS" >&2
+  die "the composed body breaks the parameter budget (see the lines above; pass --force to override)"
+fi
 
 git_state
 if [ "$(git_get in_git)" = "True" ]; then
@@ -310,5 +413,5 @@ PY
 fi
 
 printf '%s\n' "$BODY"
-warn "body: ${#BODY} chars, ${SUMCHARS} on line 1 — one commhub call this round (SKILL.md §1.1)"
+warn "body: $(nchars "$BODY") chars, ${SUMCHARS} on line 1 — one commhub call this round (SKILL.md §1.1)"
 warn "worker side: anet_payload.sh verify --file $FILE --seg $SEG --sha12 $SEGSHA"

@@ -6,10 +6,24 @@ set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$SKILL_DIR/scripts/anet_manual_node.sh"
+PAYLOAD_SH="$SKILL_DIR/scripts/anet_payload.sh"
 WORK="$(mktemp -d /tmp/anet-manual-e2e.XXXXXX)"
 PORT="${PORT:-19733}"
 HUB="http://127.0.0.1:$PORT"
 DB="$WORK/hub.db"
+
+# Where the hub source lives: ANET_E2E_HUB_SRC first, else resolved relative to this
+# skill directory (a clone of the parent repo has the skill at
+# <repo>/.agents/skills/agent-network-skill). Nothing here names a specific machine.
+HUB_SRC="${ANET_E2E_HUB_SRC:-}"
+if [ -z "$HUB_SRC" ]; then
+  for cand in "$SKILL_DIR/../../../server" "$SKILL_DIR/../../server" "$PWD/server" \
+              "$HOME/agent-network/server"; do
+    [ -f "$cand/bin/commhub.ts" ] && { HUB_SRC="$cand"; break; }
+  done
+fi
+[ -f "${HUB_SRC:-}/bin/commhub.ts" ] || { [ -f "${HUB_SRC:-}/server/bin/commhub.ts" ] && HUB_SRC="$HUB_SRC/server"; }
+[ -f "${HUB_SRC:-}/bin/commhub.ts" ] || { echo "no commhub-server source found; set ANET_E2E_HUB_SRC" >&2; exit 2; }
 
 cleanup() {
   [ -n "${HUB_PID:-}" ] && kill "$HUB_PID" 2>/dev/null || true
@@ -18,7 +32,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== booting throwaway hub on $HUB (db $DB)"
-COMMHUB_DB="$DB" bun run /vol1/1000/docker/nec8-docker/agent-network/server/bin/commhub.ts \
+COMMHUB_DB="$DB" bun run "$HUB_SRC/bin/commhub.ts" \
   --port "$PORT" --host 127.0.0.1 --db "$DB" --dev-open >"$WORK/hub.log" 2>&1 &
 HUB_PID=$!
 
@@ -200,21 +214,22 @@ mkdir -p "$PROJ/commhub_tasks/e2e"
 cat > "$PROJ/$PAYLOAD" <<'EOF'
 # e2e 规格
 
-## seg-01 一批配图
-生成 3 张暖金调配图，提示词写回本段"产出"小节。
-验收: 3 张图入库。
+## seg-01 给导出函数补单元测试
+为 exportRows() 补 3 个用例，覆盖空输入、单行、超长行。
+验收: 3 个用例全绿。
 EOF
 (
   cd "$PROJ" && git init -q . && printf '.anet/\n' > .gitignore && git add -A &&
   git -c user.email=e2e@local -c user.name=e2e commit -qm "payload file"
 ) || { echo "could not create a git project for the payload file"; exit 1; }
 BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD)"
-BODY4="$("$SKILL_DIR/scripts/anet_payload.sh" compose --project-root "$PROJ" --file "$PAYLOAD" \
-  --seg seg-01 --summary "e2e seg-01：3 张配图入库" --branch "$BRANCH" --json 2>/dev/null \
-  | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
+POINTER4="$("$SKILL_DIR/scripts/anet_payload.sh" compose --project-root "$PROJ" --file "$PAYLOAD" \
+  --seg seg-01 --summary "e2e seg-01：给导出函数补单元测试，3 个用例全绿" --branch "$BRANCH" --json 2>/dev/null)"
+BODY4="$(printf '%s' "$POINTER4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
 [ -n "$BODY4" ] || { echo "compose produced no body"; exit 1; }
-[ "${#BODY4}" -le 300 ] || { echo "the composed body is ${#BODY4} chars (budget 300)"; exit 1; }
-echo "   pointer body (${#BODY4} chars, one commhub call this round):"
+"$SKILL_DIR/scripts/anet_payload.sh" guard --body "$BODY4" >/dev/null \
+  || { echo "the composed body breaks the parameter budget"; exit 1; }
+echo "   pointer body ($(printf '%s' "$POINTER4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])') chars, one commhub call this round):"
 printf '%s\n' "$BODY4" | sed 's/^/     /'
 TASK4=$(python3 - "$HUB" "$UTOK" "$NET" "$BODY4" <<'PY'
 import json, sys, urllib.request
@@ -229,7 +244,7 @@ PY
 run ack "$TASK4" >/dev/null
 run working "$TASK4" 10 >/dev/null
 [ "$(task_status "$TASK4")" = "running" ] || { echo "the short pointer body did not flip the task to running"; exit 1; }
-run reply "$TASK4" "seg-01 done: 3 images stored" >/dev/null
+run reply "$TASK4" "seg-01 done: 3 unit tests green" >/dev/null
 [ "$(task_status "$TASK4")" = "replied" ] || { echo "expected replied"; exit 1; }
 echo "   short body round-tripped byte-exactly: acked -> running -> replied"
 

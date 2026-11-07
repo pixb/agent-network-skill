@@ -1,6 +1,8 @@
 # The manager is a user, not a node
 
 Status: draft — not executable guidance.
+Applied: accepted — shipped in v0.6.0. (The draft marker is the wiki lifecycle state, not a claim that the rule is unverified.)
+
 
 ## Finding
 
@@ -8,7 +10,8 @@ Dispatch runs with a user token, so task rows carry from_name=<username>; report
 
 ## Evidence
 
-- `raw/2026-11-07T192707Z-66718fafa7e2.json`
+- `raw/2026-11-07T192707Z-66718fafa7e2.json` — records one step only: "validate the eval spec". Not behavioural evidence; the ledger line written from it carries the operator-supplied `--validation-score`.
+- `raw/2026-11-07T201812Z-bca66563c29c.json`, `raw/2026-11-07T201902Z-f26e338e0150.log` — the 12 golden scenarios against throwaway hubs, 60 checks passed, 0 failed (the channel-landing facts of this pattern are asserted by cases 9, 10 and 11).
 
 ## Proposed next experiment
 

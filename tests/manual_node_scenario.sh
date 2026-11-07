@@ -5,7 +5,10 @@
 # usage:
 #   manual_node_scenario.sh --input <scenario.json> [--output <result.json>]
 #
-# The input file is JSON: {"scenario": "<name>", "hub_source": "<path>"}
+# The input file is JSON: {"scenario": "<name>"} — and nothing else. The hub source is
+# never named in a golden case: a golden case that embeds one machine's path is a case
+# that only passes on that machine. Resolve it from ANET_E2E_HUB_SRC, else relative to
+# this skill directory (see HUB_SRC below).
 # where <name> is one of:
 #   full-lifecycle   register, dispatch, ack, working, reply  -> task ends replied
 #   stuck-delivered  register, dispatch, nothing else         -> task ends delivered
@@ -31,7 +34,8 @@
 # The result JSON is: {"scenario", "ok", "final_status", "transitions": [...],
 #                      "verdicts": [...], "error": null}
 #
-# The hub is booted from the commhub-server source tree (ANET_E2E_HUB_SRC, or
+# The hub is booted from the commhub-server source tree (ANET_E2E_HUB_SRC, or the
+# candidates resolved below, or an input file's legacy "hub_source" field).
 # the default paths below) into a throwaway database, so nothing touches a
 # real hub.
 set -euo pipefail
@@ -57,10 +61,17 @@ SCENARIO="$(read_json scenario)"
 HUB_SRC="${ANET_E2E_HUB_SRC:-$(read_json hub_source)}"
 [ -n "$SCENARIO" ] || { echo "the scenario file has no \"scenario\" field" >&2; exit 2; }
 if [ -z "$HUB_SRC" ]; then
-  for cand in /vol1/1000/docker/nec8-docker/agent-network/server "$HOME/agent-network/server" "./server"; do
+  # The hub is booted from the commhub-server source tree. Nothing here may name a
+  # particular machine: resolve relative to this skill directory, so a clone of the
+  # parent repo (skill at <repo>/.agents/skills/agent-network-skill) finds the server
+  # on any machine, and ANET_E2E_HUB_SRC overrides it anywhere else.
+  for cand in "$SKILL_DIR/../../../server" "$SKILL_DIR/../../server" "$PWD/server" \
+              "$HOME/agent-network/server"; do
     [ -f "$cand/bin/commhub.ts" ] && { HUB_SRC="$cand"; break; }
   done
 fi
+# ANET_E2E_HUB_SRC may name the repo root instead of the server subdirectory.
+[ -f "${HUB_SRC:-}/bin/commhub.ts" ] || { [ -f "${HUB_SRC:-}/server/bin/commhub.ts" ] && HUB_SRC="$HUB_SRC/server"; }
 [ -n "$HUB_SRC" ] && [ -f "$HUB_SRC/bin/commhub.ts" ] || {
   echo "no commhub-server source found; set ANET_E2E_HUB_SRC" >&2; exit 2; }
 
@@ -166,13 +177,13 @@ if [ "$SCENARIO" = "short-pointer-payload" ]; then
   cat > "$PROJ/$PAYLOAD" <<'EOF'
 # 第 1 轮任务规格
 
-## seg-01 头三段配图
-生成 3 张暖金调佛像特写，提示词写回本段"产出"小节。
-验收: 3 张图入库 + 5 条提示词入库。
+## seg-01 给导入模块补单元测试
+步骤：为 readRows() 补 3 个用例，覆盖空文件、重复表头、超长行。
+验收: 3 个用例全绿，且失败时报错指向具体行号。
 
-## seg-02 中段配图
-生成 5 张。
-验收: 5 张图入库。
+## seg-02 更新使用文档
+步骤：把 readRows() 的参数与默认值写进 docs/guide.md。
+验收: 文档构建通过，示例可复制运行。
 EOF
   (
     cd "$PROJ" && git init -q . && printf '.anet/\n' > .gitignore && git add -A &&
@@ -180,7 +191,7 @@ EOF
   ) || fail "could not create a git project for the payload file"
   BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD)"
   POINTER_JSON="$("$PAYLOAD_SH" compose --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
-      --summary "第1轮 seg-01：头三段配图，3 张暖金佛像特写入库" --branch "$BRANCH" --json 2>/dev/null)" \
+      --summary "第1轮 seg-01：给导入模块补单元测试，3 个用例全绿" --branch "$BRANCH" --json 2>/dev/null)" \
     || fail "anet_payload.sh compose refused a body it must accept: $POINTER_JSON"
   BODY="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
   [ -n "$BODY" ] || fail "compose produced no body text"
@@ -566,14 +577,13 @@ fi
 if [ "$SCENARIO" = "short-pointer-payload" ]; then
   STORED=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK_ID?network_id=$NET" \
     | python3 -c "import json,sys;print(json.load(sys.stdin)['task']['content'])")
-  [ "${#STORED}" -le 300 ] || fail "the dispatched body is ${#STORED} chars (budget 300)"
-  FIRST_LINE="$(printf '%s\n' "$STORED" | head -1)"
-  [ "${#FIRST_LINE}" -le 80 ] || fail "line 1 is ${#FIRST_LINE} chars (budget 80)"
-  record_verdict "$(printf '%s' "body ${#STORED} chars, summary line ${#FIRST_LINE} chars" | sed -E 's/[0-9]+/<n>/g')"
-
-  case "$STORED" in
-    */home/*|*'/vol1/'*|*'~/'*|*'C:\'*) fail "the body carries an absolute path (§4 forbids it)" ;;
-  esac
+  # The budget is asserted through the script's own guard, so the test measures the
+  # body exactly the way compose measures it: characters counted in python (a C
+  # locale counts bytes, which would inflate a CJK body ~3x and make the assertion
+  # depend on the machine running the test), and the absolute-path rule read from
+  # one place instead of duplicated here.
+  "$PAYLOAD_SH" guard --body "$STORED" >"$WORK/guard.log" 2>&1 \
+    || fail "the dispatched body breaks the parameter budget: $(cat "$WORK/guard.log")"
   case "$STORED" in
     *"file: $PAYLOAD"*) ;;
     *) fail "the body does not point at the payload file: $STORED" ;;
@@ -595,6 +605,11 @@ if [ "$SCENARIO" = "short-pointer-payload" ]; then
        --summary "$(python3 -c 'print("字"*81)')" >"$WORK/compose-long.log" 2>&1; then
     fail "compose accepted an 81-character summary line"
   fi
+  # and the guard reports the budget it measured, so the verdict is a real sentence
+  BUDGET_JSON="$("$PAYLOAD_SH" guard --body "$STORED" --json 2>/dev/null)"
+  FIRST_LINE="$(printf '%s' "$BUDGET_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["first_line_chars"])')"
+  BODY_CHARS="$(printf '%s' "$BUDGET_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])')"
+  record_verdict "$(printf '%s' "body $BODY_CHARS chars, summary line $FIRST_LINE chars" | sed -E 's/[0-9]+/<n>/g')"
 
   run ack "$TASK_ID" >/dev/null 2>&1 || fail "ack failed"
   record_status "$TASK_ID"
@@ -603,7 +618,7 @@ if [ "$SCENARIO" = "short-pointer-payload" ]; then
   run working "$TASK_ID" 20 >/dev/null 2>&1 \
     || fail "working failed, the short body did not match byte-for-byte"
   record_status "$TASK_ID"
-  run reply "$TASK_ID" "seg-01 done: 3 images and 5 prompts stored" >"$WORK/reply.log" 2>&1 \
+  run reply "$TASK_ID" "seg-01 done: 3 unit tests green, docs updated" >"$WORK/reply.log" 2>&1 \
     || fail "reply failed: $(tail -1 "$WORK/reply.log")"
   record_status "$TASK_ID"
   FINAL_STATUS="$(task_status "$TASK_ID")"
