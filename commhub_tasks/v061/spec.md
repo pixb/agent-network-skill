@@ -1,4 +1,13 @@
-# agent-network-skill — v0.6.1 follow-up spec (post-merge precision round)
+# agent-network-skill — follow-up spec, precision round (written against v0.6.3)
+
+Measured at v0.6.3 on 2026-11-08: **all five segments below are still unimplemented there** (checked
+one by one: §2 has no visibility cross-reference; the TTL rule is still the `2 × idle budget` form;
+the "every REST read names `network_id`" claim is in `SKILL.md` twice; no presence/SSE scenario in
+`tests/` or `evals/`; `scripts/staleness_check.py` missing and `SKILL.md` body at 687 lines). This
+repository moves under an active worker, so before taking a segment: `git fetch && git rebase
+origin/main`, then re-check the segment's **Problem** paragraph. If it is already implemented, report
+that fact and stop — do not duplicate someone's landed change. Golden ids 1–12 are taken; the next
+free is `case-13`.
 
 Target: the agent-network-skill repository itself (this skill's own repo). Everything below is
 **portable**: no host-project paths, no runtime-specific knobs in rule text (runtime specifics are
