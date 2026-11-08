@@ -263,6 +263,52 @@ if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$(printf '%s' "$RESEND_BOD
 fi
 echo "   the same body with the requirement line removed: refused"
 
+echo "== a brief body: formatted, ≤1200, accept: required, and it round-trips (§1.2a)"
+BRIEF="e2e brief: report this node's branch and commit, read-only
+purpose: a formatted body the task pane renders as a list
+
+steps:
+- git rev-parse --abbrev-ref HEAD
+- git rev-parse --short HEAD
+
+accept:
+- the result names the branch and the commit sha
+- the result lists each command you ran, in the order you ran it
+
+report_completion once, result <= 1200 chars, line 1 is the conclusion"
+BRIEF_CHARS=$(printf '%s' "$BRIEF" | python3 -c 'import sys;print(len(sys.stdin.read()))')
+"$SKILL_DIR/scripts/anet_payload.sh" guard --body "$BRIEF" --kind brief >/dev/null \
+  || { echo "guard refused a brief body that meets its own rule ($BRIEF_CHARS chars)"; exit 1; }
+if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$(printf '%s' "$BRIEF" | sed '/^accept:/,+2d')" --kind brief >/dev/null 2>&1; then
+  echo "guard accepted a brief body with no accept block"; exit 1
+fi
+if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$BRIEF
+| a | b |
+|---|---|" --kind brief >/dev/null 2>&1; then
+  echo "guard accepted a brief body carrying a table"; exit 1
+fi
+echo "   brief body $BRIEF_CHARS chars: accepted; no-accept and with-a-table: refused"
+TASK6=$(python3 - "$HUB" "$UTOK" "$NET" "$BRIEF" <<'PY'
+import json, sys, urllib.request
+hub, utok, net, body = sys.argv[1:5]
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": body, "network_id": net, "ttl_seconds": 3600}).encode())
+print(json.load(urllib.request.urlopen(req))["task_id"])
+PY
+)
+echo "   dispatched brief task $TASK6"
+run ack "$TASK6" >/dev/null
+run working "$TASK6" >/dev/null
+[ "$(task_status "$TASK6")" = "running" ] || { echo "the brief body did not flip the task to running"; exit 1; }
+run reply "$TASK6" "branch pixb, commit a5081391a; ran git rev-parse --abbrev-ref HEAD then --short HEAD" >/dev/null
+[ "$(task_status "$TASK6")" = "replied" ] || { echo "expected replied"; exit 1; }
+STORED=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK6?network_id=$NET" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['task']['content'])")
+[ "$STORED" = "$BRIEF" ] || { echo "the hub stored a body that is not the one composed"; exit 1; }
+echo "   brief body round-tripped byte-exactly: acked -> running -> replied"
+
 echo "== one file per task: the pointer names a FILE, so its sha12 is the FILE's hash"
 FILE_TASK="commhub_tasks/e2e/export-tests.md"
 cat > "$PROJ/$FILE_TASK" <<'EOF'

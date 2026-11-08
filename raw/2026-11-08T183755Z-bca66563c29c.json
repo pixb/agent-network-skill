@@ -1,0 +1,16 @@
+{
+  "skill": "agent-network-skill",
+  "ok": true,
+  "steps": [
+    {
+      "step": "validate the eval spec",
+      "exit_code": 0,
+      "ok": true
+    },
+    {
+      "step": "run the scenarios",
+      "exit_code": 0,
+      "ok": true
+    }
+  ]
+}

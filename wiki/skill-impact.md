@@ -83,3 +83,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/anet_payload.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/resend-body-carries-the-requirement-line.md`
+
+## 2026-11-08T18:38:08Z — accepted
+
+- Proposal: `brief-body-v070`
+- Target: `scripts/anet_payload.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/brief-body-in-the-parameter.md`

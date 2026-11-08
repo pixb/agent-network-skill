@@ -33,3 +33,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-08T18:16:02Z — pattern added
 
 - `resend-body-carries-the-requirement-line`
+
+## 2026-11-08T18:38:07Z — pattern added
+
+- `brief-body-in-the-parameter`

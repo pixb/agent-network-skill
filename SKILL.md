@@ -20,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.9
+  version: 0.7.0
   created: 2026-10-07
   last_reviewed: 2026-11-09
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.9
+  version: 0.7.0
   created: 2026-10-07
 ---
 
@@ -214,7 +214,8 @@ of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, 
 
 | argument | budget | why this number |
 |---|---|---|
-| `task` (dispatch body) | ≤ 300 chars, ≤ 6 lines, line 1 ≤ 80 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
+| `task` (pointer body at a payload file) | ≤ 300 chars, ≤ 6 lines, line 1 ≤ 80 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
+| `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1200 chars, line 1 ≤ 80, **`accept:` required**, markdown-safe | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
 | `report_completion` `result` | ≤ 1200 chars, line 1 ≤ 80 | the delivery is read in the node's task pane, which collapses at ≈12 lines: conclusion and evidence lines first, the long text in a file |
 | `send_message` / `broadcast` / `send_reply` | ≤ 1500 chars, line 1 ≤ 80 | list views show line 1 only |
 | resend body (quotes an existing `task_id`) | ≤ 340 chars, line 1 ≤ 80, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes (§7.5) |
@@ -260,6 +261,40 @@ Segment pointers stay supported — `compose --file … --seg seg-NN` prints
 `file: …  seg: seg-NN  sha12: <segment hash>` — for a task that is one section of a document you
 must not split (a spec chapter, a runbook). Then the worker must locate the segment, and it reads the
 neighbours: use it when the document's unity is worth more than the worker's context, not by default.
+
+### 1.2a A brief body: when the task fits in the parameter, format it
+
+A task that is small, read-only, and needs no versioned spec goes in the body itself, formatted for the
+task pane (which renders markdown) and readable on the plain-text surfaces. Budget ≤1200, line 1 ≤80,
+an `accept:` block required:
+
+```text
+e2e demo: report this node's branch, commit and runtime version, read-only
+purpose: a formatted body the task pane renders as a list
+
+steps:
+- pwd
+- git rev-parse --abbrev-ref HEAD
+- node --version, and say so if it is unavailable
+
+accept:
+- the result names the branch, the commit sha and the node version
+- the result lists each command you ran, in the order you ran it
+
+deliverable: the result text only, nothing written to disk
+report_completion once, result <= 1200 chars, line 1 is the conclusion
+```
+
+Audited mechanically: `bash scripts/anet_payload.sh guard --body "…" --kind brief` — ≤1200 characters,
+line 1 ≤80, the `accept:` block present, and markup the plain-text surfaces cannot render (tables, `#`
+headings, bold markers, backticks) refused.
+
+**Pick the shape by what the work needs**, not by taste:
+
+- brief body: steps and acceptance fit in ≤1200 characters, no file to version (read-only probes, one-shot
+  fixes, a question with a definition of done);
+- pointer body (§1.2): the spec is longer than a parameter, needs a `sha12` proof, needs to be reviewed in
+  git, or is reused across rounds.
 
 Why it is correctness, not cosmetics: `sessions.task` keeps the first 200 characters cut blindly (the
 node card, `get_all_status`, `/api/status`), and `report_status(status="working")` matches the body

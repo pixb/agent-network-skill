@@ -76,6 +76,7 @@ these are discipline, not limits:
 ./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit a dispatch body
 ./scripts/anet_payload.sh guard   --body "$RESULT" --kind result             # audit a delivery text
 ./scripts/anet_payload.sh guard   --body "$RESEND" --kind resend             # a resend body: ≤340, accept: required
+./scripts/anet_payload.sh guard   --body "$BRIEF" --kind brief              # a brief body: ≤1200, accept: required, markdown-safe
 ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-tests.md \
     --hub "$COMMHUB_URL" --network <network_id> --allow-untracked            # put the bytes on the hub
 ./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries

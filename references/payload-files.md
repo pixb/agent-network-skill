@@ -26,7 +26,8 @@ the repo, and the same pointer keeps working after `retry_task`.
 
 | argument | budget | hub ceiling (measured) |
 |---|---|---|
-| `send_task(task=…)` | ≤ 300 characters, ≤ 6 lines, line 1 ≤ 80 chars | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (pointer body) | ≤ 300 characters, ≤ 6 lines, line 1 ≤ 80 chars | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (brief body, §1.2a) | ≤ 1200 characters, line 1 ≤ 80, `accept:` required, markdown-safe | 10 000 (`TASK_CONTENT_MAX`) |
 | `send_task(context=…)` | ≤ 200 characters, one line (project + branch + "in your working directory") | — |
 | `send_message` / `broadcast` / `send_reply` | ≤ 1500 characters, line 1 ≤ 80 | 10 000 (`send_reply` text) |
 | `report_completion(result=…)` | ≤ 1200 characters, line 1 ≤ 80 | stores the first 4000 |
@@ -38,7 +39,6 @@ adds drift. The delivery body is capped at 1200 because the task pane collapses 
 renders where" below).
 
 ## What renders where (measured on the Dashboard, 2026-11-09)
-
 The same text lands on surfaces with **different renderers**, so the format rule is written for the
 worst surface, not the best one:
 
@@ -68,6 +68,42 @@ Never inside a parameter: a markdown spec, a code block, a log, a diff, a table,
 file, or a path the other machine cannot open — by shape: a leading `/` (POSIX absolute), `~/`, a
 drive path `X:\` / `X:/`, or a UNC share `\\host\share`. `scripts/anet_payload.sh guard` names them
 by shape, so the rule never encodes one machine's mount prefix.
+
+## Brief body: the task in the parameter, formatted (SKILL.md §1.2a)
+
+Not every task needs a file. A read-only probe, a one-shot fix, a question with a definition of done —
+that fits in the body, and the body can be shaped so the task pane renders it as a list:
+
+```text
+demo: report this node's branch, commit and runtime version, read-only
+purpose: a formatted body the task pane renders as a list
+
+steps:
+- pwd
+- git rev-parse --abbrev-ref HEAD
+- node --version, and say so if it is unavailable
+
+accept:
+- the result names the branch, the commit sha and the node version
+- the result lists each command you ran, in the order you ran it
+
+deliverable: the result text only, nothing written to disk
+report_completion once, result <= 1200 chars, line 1 is the conclusion
+```
+
+Audited with `bash scripts/anet_payload.sh guard --body "…" --kind brief`: ≤1200 characters, line 1 ≤80,
+the `accept:` block present, markup refused.
+
+**Why length is affordable here** (measured on a live hub with a pi runtime node, 2026-11-09): bodies of
+117, 277 and 484 characters all went `delivered → running → replied` in about 20 seconds each. The
+`working` flip needs a byte-exact match (`UPDATE tasks SET status='running' … WHERE to_name = ?1 AND
+status IN ('delivered','acked') AND content = ?2`, `server/src/tools.ts:1492-1493`), and the node echoes
+the body it fetched from the hub — so length costs nothing there. What length does cost: the 200-character
+preview on the node card (so line 1 must stand alone), and the worker's context, which pays for every
+character of the body on every round.
+
+**Use the pointer shape instead** when the spec exceeds a parameter, needs a `sha12` proof, needs review in
+git, or is reused across rounds.
 
 ## Payload file: one file per task
 

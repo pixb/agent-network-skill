@@ -69,10 +69,11 @@
 # options:
 #   --project-root <dir>  repo that holds the payload file (default: $PWD)
 #   --max <n>            body budget in characters (guard defaults: task 300, result 1200)
-#   --kind task|result|resend   guard: which text is audited; result = the ≤1200 delivery text,
-#                        line count free, markup refused; resend = a body quoting an existing task id,
-#                        budget 340 (quoting a hub task id costs 36 characters) and a requirement line
-#                        is mandatory
+#   --kind task|result|brief|resend   guard: which text is audited
+#       task   ≤300, ≤6 lines — the pointer body (§1.2)
+#       brief  ≤1200, lines free, markup refused, `accept:` required — a formatted body with no payload file
+#       result ≤1200, lines free, markup refused — the delivered result text
+#       resend ≤340, `accept:` required — a body quoting an existing task id (quoting it costs 36 chars)
 #   --summary-max <n>    first-line budget in characters (default 80)
 #   --no-markup          guard only: refuse markup plain-text surfaces cannot render
 #   --allow-dirty         do not refuse a file with uncommitted changes
@@ -273,24 +274,24 @@ lines = body.split("\n")
 violations = []
 if len(body) > max_chars:
     violations.append(f"the body is {len(body)} chars (budget {max_chars}) — the long text belongs in the file, not in the parameter")
-if len(lines) > 6 and kind != "result":
+if len(lines) > 6 and kind not in ("result", "brief"):
     violations.append(f"the body is {len(lines)} lines (budget 6)")
 # A body that names an existing task is a RESCHEDULE: it is the text the operator will accept against,
 # so it must carry a requirement line. Trigger: a task id quoted in the body (hub ids are uuid4, which
 # no file path, sha12, branch name or URL produces). Measured 2026-11-09: a timeout resend was
 # dispatched with the quoted id and no acceptance line, and acceptance became a prose argument.
-if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", body, re.I):
+if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", body, re.I) or kind == "brief":
     if not re.search(r"(?i)\baccept(ance)?\b|验收", body):
         violations.append(
-            "the body names an existing task id (a reschedule) and carries no requirement line — a "
-            "resend body must contain an `accept:` line naming what counts as done, otherwise "
-            "acceptance has nothing to quote (measured 2026-11-09: a timeout resend without one)"
+            "the body names an existing task id (a reschedule) or is a brief body, and carries no "
+            "requirement line — the body must contain an `accept:` line naming what counts as done, "
+            "otherwise acceptance has nothing to quote (measured 2026-11-09: a timeout resend without one)"
         )
 if lines and len(lines[0]) > max_first:
     violations.append(f"line 1 is {len(lines[0])} chars (budget {max_first}): sessions.task keeps only the first 200 chars and cuts blindly")
 if '```' in body:
     violations.append("the body contains a code block — code belongs in the payload file")
-if no_markup or kind == "result":
+if no_markup or kind in ("result", "brief"):
     # Measured on the Dashboard: the node card (NodesView.tsx line-clamp-2), the node list rows
     # (truncate), the Tasks detail (TaskDetail.tsx, whitespace-pre-wrap) and the Messages page all
     # render PLAIN text; only the task pane (TaskChatPanel, react-markdown) renders markdown. So a
@@ -352,6 +353,7 @@ case "$CMD" in
     if [ -z "$MAX" ]; then
       case "$KIND" in
         result) MAX=1200 ;;
+        brief) MAX=1200 ;;
         resend) MAX=340 ;;
         *) MAX=300 ;;
       esac
