@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.4
+  version: 0.6.5
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.4
+  version: 0.6.5
   created: 2026-10-07
 ---
 
@@ -674,6 +674,14 @@ fetches that body from the hub (never retype it), and the human works the **file
 file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
 on the revision you happen to have. `reply` carries a ≤400-character `result` — conclusion, what you
 ran to verify it, and the path of the long report, which goes into the segment and gets committed.
+
+**The `sha12` in the pointer is the SEGMENT hash, not the file hash.** `verify` prints it as
+`sha12 : <value>  expected <value>` for the `## <seg>` block only; hashing the whole payload file
+produces a different value and looks like a mismatch. A worker that reports “task says `X`, the
+committed file is really `Y`” has almost always hashed the whole file — re-run `verify` with the
+segment name, quote its output line in `reply`, and treat a whole-file hash as a node-side
+calibration error, not as a planner-side conflict (2026-11-08, 0007 seg-02: task `dc58d929edb8`,
+worker reported the whole-file `fb9bc1fdbc62`; `verify --seg seg-02` exited 0 on `dc58d929edb8`).
 
 ### 7.5 Two aliases, parallel dispatch, and timeout resend (operator order 2026-11-08)
 
