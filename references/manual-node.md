@@ -251,17 +251,18 @@ verdict, run the next one in the next round.
 The task a manual node receives is normally a 4-line pointer (SKILL.md §1.2):
 
 ```text
-第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
-file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
-branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
+branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
 report_completion once, result <= 400 chars
 ```
 
 So the human side of the job is: `git pull`, then prove the pointer with the sibling script:
 
 ```bash
-scripts/anet_payload.sh verify --file commhub_tasks/r07/spec.md --seg seg-01 \
-    --sha12 3f7c64c57fb6 --print-body
+scripts/anet_payload.sh verify --file commhub_tasks/r07/export-tests.md \
+    --sha12 756d1c7db68e --print-body
+# a segment pointer adds --seg seg-NN, and then the sha12 is the segment's, not the file's
 ```
 
 - a mismatch (or a missing segment) is a **conflict**: run `working`, then say so in `reply` — never

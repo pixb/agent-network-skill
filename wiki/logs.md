@@ -17,3 +17,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-08T02:14:14Z — pattern added
 
 - `hub-attachment-route-for-manual-nodes`
+
+## 2026-11-08T17:17:26Z — pattern added
+
+- `one-task-one-payload-file`

@@ -22,10 +22,28 @@
   ],
   "success_measure": "The planner dispatches per the hard rules (one commhub call per round, a short pointer body the worker can echo byte-for-byte) and the worker acks, reports working, and sends exactly one completion per task, so every task flips to replied on the hub and verification is read-only via get_task; a manual node's task also reaches replied, driven by the bundled script",
   "outcome": "Two agents complete a verifiable task loop under one protocol, and a manual node is driven through the same lifecycle without an agent behind it",
-  "intended_users": ["planner agent (control room)", "worker agent (executor)", "human operator"],
-  "input_types": ["task instructions", "MCP tool responses", "manual node hub url and node alias"],
-  "output_artifacts": ["hub task state transitions", "completions result records", "manual node heartbeat and status files"],
-  "use_cases": ["task dispatch", "task consumption", "status verification", "protocol troubleshooting", "manual node operation"],
+  "intended_users": [
+    "planner agent (control room)",
+    "worker agent (executor)",
+    "human operator"
+  ],
+  "input_types": [
+    "task instructions",
+    "MCP tool responses",
+    "manual node hub url and node alias"
+  ],
+  "output_artifacts": [
+    "hub task state transitions",
+    "completions result records",
+    "manual node heartbeat and status files"
+  ],
+  "use_cases": [
+    "task dispatch",
+    "task consumption",
+    "status verification",
+    "protocol troubleshooting",
+    "manual node operation"
+  ],
   "examples": [
     {
       "invocation": "/agent-network-skill split this round's work and dispatch it to <worker-alias>",
@@ -33,7 +51,7 @@
     },
     {
       "invocation": "/agent-network-skill the task brief is 2000 characters, dispatch it properly",
-      "description": "Write the brief into commhub_tasks/<round>/spec.md as ## seg-NN segments, commit and push, then send_task with the 4-line pointer body built by scripts/anet_payload.sh compose (summary line + file + seg + sha12) — one commhub call this round"
+      "description": "Write the brief into commhub_tasks/<round>/<task-slug>.md — one file per task, so a worker never reads another task text — commit and push, then send_task with the 4-line pointer body built by scripts/anet_payload.sh compose (summary line + file + sha12; add seg only when the task is one section of a document) — one commhub call this round"
     },
     {
       "invocation": "/agent-network-skill I dispatched three tasks and checked status in one turn, what state is the hub in",
@@ -60,7 +78,12 @@
   ],
   "typical_completion_time": "5-60 minutes",
   "compatibility": {
-    "declared": ["opencode", "pi", "codex", "claude-code"],
+    "declared": [
+      "opencode",
+      "pi",
+      "codex",
+      "claude-code"
+    ],
     "certified": []
   },
   "environment": {
@@ -68,7 +91,9 @@
       "CommHub source tree docs-site/docs/api/mcp-tools.md",
       "CommHub source tree server/src/tools.ts"
     ],
-    "data_sources": ["CommHub MCP tools/call responses"],
+    "data_sources": [
+      "CommHub MCP tools/call responses"
+    ],
     "required_capabilities": [
       "HTTP POST to <hub>/mcp (local default http://127.0.0.1:9200/mcp)",
       "Read the hub token from an environment variable or local config",
@@ -91,7 +116,10 @@
       "Mint and store a node token for a manual node, and write heartbeat state files next to its config"
     ],
     "mutation_boundary": "approval-required",
-    "approval_required": ["Dispatching and verifying are triggered by the operator's instruction; the planner stops once dispatches are sent", "Running the manual-node script against a hub is an explicit operator action"]
+    "approval_required": [
+      "Dispatching and verifying are triggered by the operator's instruction; the planner stops once dispatches are sent",
+      "Running the manual-node script against a hub is an explicit operator action"
+    ]
   },
   "software_mutation": {
     "applies": false

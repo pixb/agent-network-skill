@@ -62,3 +62,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `evals/agent-network-skill.eval.md`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/portable-protocol-content.md`
+
+## 2026-11-08T17:17:26Z — accepted
+
+- Proposal: `one-task-one-file-v067`
+- Target: `scripts/anet_payload.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/one-task-one-payload-file.md`

@@ -1,0 +1,152 @@
+== booting throwaway hub on http://127.0.0.1:19733 (db /tmp/anet-manual-e2e.DEiN5Q/hub.db)
+   hub is up
+== registering a user
+   user registered, network net_f72690a4cc51
+== minting a manual-node token through the script's own init path
+   2026-11-08T17:12:59.517Z registered manual node "e2e-manual-node" (node_id n_e8019742) -> /tmp/anet-manual-e2e.DEiN5Q/project/.anet/nodes/e2e-manual-node/config.json
+   2026-11-08T17:12:59.576Z report idle ok=true inbox=0
+   next: anet_manual_node.sh start --node e2e-manual-node   (keeps the node visible; then: anet_manual_node.sh inbox --node e2e-manual-node)
+   node token minted (node_id n_e8019742, network net_f72690a4cc51)
+== registering the node (report_status agent=manual)
+2026-11-08T17:12:59.923Z report idle ok=true inbox=0
+== dispatching a task to the manual node
+   task dispatched: line one summary of the work
+second line of the body
+third line with 特殊字符 to prove byte-exact matching
+   task id: f65b82db-0e4a-468e-a0ad-7ca52fea3b7a
+== check BEFORE the work starts (this is the stuck-task diagnosis)
+   node        : e2e-manual-node
+   session     : idle
+   last seen   : 2026-11-08 17:12:59
+   queue depth : 1
+   
+   slot (one per node — the hub keeps a single task preview here):
+     holds     : (free)
+     hub text  : line one summary of the work
+   second line of the body
+   third line with 特殊字符 to prove byte-exact matching
+   
+   queue (1 open task(s), 1 inbox row(s)):
+   - f65b82db-0e4a-468e-a0ad-7ca52fea3b7a status=delivered age=0s from=e2euser  waiting for the slot
+   
+   
+   verdict: task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a is still delivered after 0s — nobody acked it: the node is reachable but the work never started
+== inbox
+   ------------------------------------------------------------
+   id      : f65b82db-0e4a-468e-a0ad-7ca52fea3b7a
+   from    : e2euser
+   type    : task | task status: delivered | priority: normal | at: 2026-11-08 17:13:00 
+   content : line one summary of the work
+   second line of the body
+   third line with 特殊字符 to prove byte-exact matching
+   ------------------------------------------------------------
+   
+   Taking a task is a separate step — reading the inbox does not start the work.
+   Without it the task stays 'delivered' and the planner sees an idle node.
+     anet_manual_node.sh working f65b82db-0e4a-468e-a0ad-7ca52fea3b7a 0 --node e2e-manual-node
+== ack
+   acked f65b82db-0e4a-468e-a0ad-7ca52fea3b7a (hub task status: acked)
+== working (body fetched from the hub, never retyped)
+   2026-11-08T17:13:00.870Z report working 42% ok=true inbox=0
+   task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a is now running
+== state working 80 (heartbeat keeps re-reporting)
+   2026-11-08T17:13:01.072Z report working 80% ok=true inbox=0
+== check WHILE running
+   node        : e2e-manual-node
+   session     : working
+   last seen   : 2026-11-08 17:13:01
+   queue depth : 1
+   
+   slot (one per node — the hub keeps a single task preview here):
+     holds     : f65b82db-0e4a-468e-a0ad-7ca52fea3b7a
+     hub text  : line one summary of the work
+   second line of the body
+   third line with 特殊字符 to prove byte-exact matching
+   
+   queue (1 open task(s), 0 inbox row(s)):
+   - f65b82db-0e4a-468e-a0ad-7ca52fea3b7a status=running age=1s from=e2euser  IN THE SLOT
+   
+   
+   verdict: task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a is running — the work is in progress
+== reply (terminal)
+   2026-11-08T17:13:01.376Z report idle 0% ok=true inbox=0
+   replied to f65b82db-0e4a-468e-a0ad-7ca52fea3b7a (hub task status: replied)
+   hub result: done: 301 images generated, report committed as abc1234
+== check AFTER completion
+   node        : e2e-manual-node
+   session     : idle
+   last seen   : 2026-11-08 17:13:01
+   queue depth : 0
+   
+   slot (one per node — the hub keeps a single task preview here):
+     holds     : (free)
+     hub text  : (empty)
+   
+   queue (0 open task(s), 0 inbox row(s)):
+     (none)
+   
+   left behind (1 task(s) disappeared from your inbox):
+   - f65b82db-0e4a-468e-a0ad-7ca52fea3b7a  (reassigned away / expired / retried — see: show f65b82db-0e4a-468e-a0ad-7ca52fea3b7a)
+   
+   
+   verdict: no open tasks — nothing is in flight
+   verdict: task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a disappeared from your inbox — it was reassigned away, expired, or retried; run: show f65b82db-0e4a-468e-a0ad-7ca52fea3b7a
+== heartbeat: start, verify it re-reports, stop
+   started heartbeat (pid 3883134, every 30s) -> /tmp/anet-manual-e2e.DEiN5Q/project/.anet/nodes/e2e-manual-node/manual-heartbeat.log
+   running (pid 3883134)
+   reported state: {"status":"idle","progress":0,"task":null,"task_id":null}
+   presence stream: {"started_at":"2026-11-08T17:13:01.753Z","connected":true,"since":"2026-11-08T17:13:01.800Z","connects":1,"reconnects":0,"superseded":0,"last_error":null,"last_reason":null,"at":"2026-11-08T17:13:01.800Z"}
+   2026-11-08T17:13:01.800Z sse connected net_f72690a4cc51:e2e-manual-node
+   2026-11-08T17:13:01.807Z report idle 0% ok=true inbox=0
+   stopped heartbeat (pid 3883134)
+   not running
+   reported state: {"status":"idle","progress":0,"task":null,"task_id":null}
+   presence stream: {"started_at":"2026-11-08T17:13:01.753Z","connected":true,"since":"2026-11-08T17:13:01.800Z","connects":1,"reconnects":0,"superseded":0,"last_error":null,"last_reason":null,"at":"2026-11-08T17:13:01.800Z"}
+   2026-11-08T17:13:01.800Z sse connected net_f72690a4cc51:e2e-manual-node
+   2026-11-08T17:13:01.807Z report idle 0% ok=true inbox=0
+== negative: replying to an already-terminal task must fail
+   correctly refused: task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a is already replied — nothing to close
+== negative: working on a terminal task must fail
+   correctly refused: task f65b82db-0e4a-468e-a0ad-7ca52fea3b7a is already replied — a terminal task cannot go back to running
+== a second task closed with --via send_reply
+   acked 64d0e476-0ebe-4a17-a3a1-02f35965854f (hub task status: acked)
+   2026-11-08T17:13:05.633Z report working ok=true inbox=0
+   task 64d0e476-0ebe-4a17-a3a1-02f35965854f is now running
+   2026-11-08T17:13:05.788Z report idle 0% ok=true inbox=0
+   replied to 64d0e476-0ebe-4a17-a3a1-02f35965854f (hub task status: replied)
+== a task dispatched by another NODE, not a human
+   planner node dispatched task 18dc6ae8-f030-46a3-a00a-32f33269f7ff
+   acked 18dc6ae8-f030-46a3-a00a-32f33269f7ff (hub task status: acked)
+   2026-11-08T17:13:06.410Z report working ok=true inbox=0
+   task 18dc6ae8-f030-46a3-a00a-32f33269f7ff is now running
+   2026-11-08T17:13:06.600Z report idle 0% ok=true inbox=0
+   replied to 18dc6ae8-f030-46a3-a00a-32f33269f7ff (hub task status: replied)
+   planner inbox rows: 1
+== a pointer-style dispatch: short body, the spec lives in a payload file (§1.2)
+   pointer body (258 chars, one commhub call this round):
+     e2e seg-01：给导出函数补单元测试，3 个用例全绿
+     file: commhub_tasks/e2e/spec.md  seg: seg-01  sha12: ad855e108a88
+     branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+     report_completion once, result <= 400 chars
+   short body round-tripped byte-exactly: acked -> running -> replied
+== one file per task: the pointer names a FILE, so its sha12 is the FILE's hash
+   whole-file pointer (no seg:), sha12 47b44ac24710 matches an independent sha256; a wrong sha exits 3
+   a neighbour's task text is not in this file: 0 segment anchors
+   per-task pointer round-tripped: acked -> running -> replied
+== attachments: a task carries a file through the hub, the manual node pulls it
+   uploaded via anet_payload.sh: file_id=f35f76dda47540cba18585d7c9f23f12 sha12=43d2feeb19df
+   anet_payload.sh: the file is 13631488 bytes; the hub caps one upload at 12582912 (12 MiB) — split it, or ship it on the branch
+   upload refuses to run without ANET_TOKEN in the environment (never an argv value)
+   hub refused a malformed attachment: bad_attachments
+   task with attachment: e4c2d02e-347f-4919-9f61-33c352415f72
+   task e4c2d02e-347f-4919-9f61-33c352415f72 carries 1 attachment(s):
+     file_id=f35f76dda47540cba18585d7c9f23f12 name=spec.md mime=text/markdown
+     fetch: anet_manual_node.sh fetch f35f76dda47540cba18585d7c9f23f12 --node e2e-manual-node
+   fetched f35f76dda47540cba18585d7c9f23f12 -> /tmp/anet-manual-e2e.DEiN5Q/downloaded.md (117B, sha12 43d2feeb19df)
+   fetched bytes match the uploaded file (sha12 43d2feeb19df)
+   sha12 mismatch: the hub's bytes hash to 43d2feeb19df, the task body names 000000000000 — this is not the revision the dispatch pointed at. Report the conflict (reply with it), do not work on the file you happen to have. Nothing was written.
+            network, so a file uploaded in another network is unreadable here
+            network, so a file uploaded in another network is unreadable here
+   node of network net_4cdec1864dec cannot read the file uploaded in net_f72690a4cc51 (hub answers 404, not 403)
+
+ALL E2E ASSERTIONS PASSED

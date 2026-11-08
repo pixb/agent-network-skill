@@ -1,0 +1,4 @@
+{
+  "scenario": "whole-file-pointer",
+  "notes": "one task = one file: the pointer names the file and the file sha12 (no seg:), verified against an independent sha256"
+}

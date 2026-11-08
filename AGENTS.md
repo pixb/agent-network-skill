@@ -35,7 +35,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
 | [references/payload-files.md](references/payload-files.md) | Short parameters in depth: budgets, `## seg-NN` segment format, the sha12, `compose` guards, handoff routes (git / hub attachment, with its measured limits), failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what expires, how to identify a token, revocation, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | Run this on the manual node's machine: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and prove it: `compose`, `verify`, `guard`, `list`, `upload` (bytes through the hub) |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `sha12:`, one task per file; `seg:` for a segment pointer) and prove it: `compose`, `verify`, `guard`, `list`, `upload` (bytes through the hub) |
 | [scripts/run_evals.py](scripts/run_evals.py) | The eval runner: `python3 scripts/run_evals.py` gates the skill's behaviour |
 | [evals/](evals/) | The eval spec and its golden cases (real hubs, real tasks) |
 | [tests/](tests/) | The same scenarios run end to end, narrated |
@@ -49,8 +49,10 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   round even when it reads the hub before and after it (`anet_manual_node.sh working` fetches the
   stored body so the echo is byte-exact, then proves the task reached `running`) — the rule counts
   transitions, not shell characters.
-- **A long task is a pointer, never a paste.** The body is ≤300 characters; the spec goes in a
-  payload file split into `## seg-NN`, and the parameter names `file:` + `seg:` + `sha12:`. Build it
+- **A long task is a pointer, never a paste.** The body is ≤300 characters; the spec lives in a
+  payload file, **one file per task** (a worker reads the file it is pointed at — a file holding six
+  tasks makes it pay for six), and the parameter names `file:` + `sha12:`; add `seg:` only when the
+  task really is one section of a document you must not split. Build it
   with `scripts/anet_payload.sh compose`, verify it on the worker side with `verify`, audit an
   existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
   the shell — a C locale must not silently triple a CJK body.

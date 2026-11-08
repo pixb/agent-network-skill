@@ -1,0 +1,32 @@
+{
+  "scenario": "whole-file-pointer",
+  "ok": true,
+  "final_status": "replied",
+  "transitions": [
+    "dispatched",
+    "status:delivered",
+    "status:acked",
+    "status:running",
+    "status:replied"
+  ],
+  "verdicts": [
+    "pointer names the task's own file (255 chars, sha12 ebdcc65c69cb)"
+  ],
+  "checks": {
+    "pointer_names_the_task_file": true,
+    "pointer_has_no_segment_field": true,
+    "whole_file_sha12_matches_independent_hash": true,
+    "verify_accepts_the_whole_file_sha12": true,
+    "verify_refuses_a_wrong_whole_file_sha12": true,
+    "task_file_carries_no_other_task": true,
+    "task_reaches_replied": true,
+    "result_stored_on_task_row": true,
+    "transitions_observed": true,
+    "stuck_task_is_diagnosed": false,
+    "terminal_task_refuses_second_reply": false,
+    "hijacked_task_is_refused": false,
+    "vanished_task_is_named": false,
+    "second_task_is_refused": false
+  },
+  "error": null
+}

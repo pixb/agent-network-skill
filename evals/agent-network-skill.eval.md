@@ -21,6 +21,7 @@ it a pass.
 | `case-10` (`ask-by-reply-strands`) | the same question written as a plain `reply` (default = `report_completion`) lands only in `completions` + `tasks.result`: absent from the alias messages, absent from the inbox, **no unread for the human**, and the task is terminal so a second reply is refused |
 | `case-11` (`ask-by-send-reply-visible`) | one flag apart (`--via send_reply`): the text **is** in the alias messages the Messages page reads (and in the task result), and the task is still closed — which is why a question must not be written as a reply |
 | `case-12` (`short-pointer-payload`) | the dispatched body is a **4-line pointer** at a payload-file segment (§1.2): the hub stores it **within the 300-character budget**, line 1 within 80, with **no absolute path**; `scripts/anet_payload.sh verify` accepts the sha12 it names, **refuses a wrong sha12**, and `compose` **refuses an over-long summary**; the short body then round-trips byte-exactly through `acked → running → replied` |
+| `case-13` (`whole-file-pointer`) | **one task = one file** (§1.2): composed with no `--seg`, the pointer names **the task's own file** and carries **no `seg:` field**; its `sha12` equals an **independently computed `sha256(file)[:12]`**, `verify` accepts it and **refuses a wrong one** (exit 3, naming the mismatch), the file carries **no other task's text** (zero segment anchors), and the pointer round-trips `acked → running → replied` |
 `case-3` is the holdout (`split: "test"`): it is never fed to an optimization loop.
 
 ## Running them
@@ -86,7 +87,8 @@ say-so):
     {"id": "case-9", "input": "golden/case-9/input.json", "expected": "golden/case-9/expected.json", "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-10", "input": "golden/case-10/input.json", "expected": "golden/case-10/expected.json", "split": "val", "expected_status": "pending-first-green"},
     {"id": "case-11", "input": "golden/case-11/input.json", "expected": "golden/case-11/expected.json", "split": "val", "expected_status": "pending-first-green"},
-    {"id": "case-12", "input": "golden/case-12/input.json", "expected": "golden/case-12/expected.json", "split": "val", "expected_status": "pending-first-green"}
+    {"id": "case-12", "input": "golden/case-12/input.json", "expected": "golden/case-12/expected.json", "split": "val", "expected_status": "pending-first-green"},
+    {"id": "case-13", "input": "golden/case-13/input.json", "expected": "golden/case-13/expected.json", "split": "val", "expected_status": "pending-first-green"}
   ]
 }
 ```

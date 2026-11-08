@@ -5,8 +5,9 @@ description: >-
   ack_inbox / report_status / report_completion): token tiers (utok/atok/ntok), the task lifecycle
   state machine, the exact-match parameter rules, cross-machine conventions, requirement-pool mode,
   manual nodes (no MCP runtime) via scripts/anet_manual_node.sh, and the call-discipline rules: one
-  commhub call per round, short task/message parameters with long text in a payload file segment
-  addressed by path + seg id + sha12. Triggers: dispatch a task, take a task, verify work, check
+  commhub call per round, short task/message parameters with long text in a payload file per task
+  addressed by path + sha12.
+  Triggers: dispatch a task, take a task, verify work, check
   inbox, task stuck in acked or delivered, alias_not_found, report_completion has no effect, one call per round,
   task body too long, commhub, agent-network, MCP worker, control room, requirement pool, manual node
   heartbeat, dashboard node card truncated. Chinese triggers (keep matching these): 派任务、收任务、验收、查 inbox、任务卡在 acked、
@@ -19,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.6
+  version: 0.6.7
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.6
+  version: 0.6.7
   created: 2026-10-07
 ---
 
@@ -151,8 +152,8 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
    `anet whoami` when in doubt.
 2. **Split the work**: every task must be self-contained (background + what to do + completion
    criteria) and must state "**do this in your own working directory**", with relative paths only
-   (forbidden forms in §4). Write the long version of that into a **payload file segment** (§1.2) and
-   dispatch a pointer at it. The operator names the `alias` — **never assume a default**.
+   (forbidden forms in §4). Write the long version of that into a **payload file — one file per task**
+(§1.2) and dispatch a pointer at it. The operator names the `alias` — **never assume a default**.
 3. **Dispatch** (§1.1 and §1.2 are hard rules, not style):
    - One call per task **and one commhub call per round**: `send_task(alias=<worker-alias>,
      task=<short body>, context=<one line>, priority=<high|normal|low>, ttl_seconds=<default 3600,
@@ -212,34 +213,43 @@ Budgets for text passed **into** a commhub argument: `task` ≤ 300 characters, 
 ≤ 400 (the row stores 4000 — do not use them all). Never a pasted spec, a code block, a log, a diff,
 a table, a file's content, or an absolute path.
 
-Long text lives in a **payload file in your working tree** — `commhub_tasks/<round>/spec.md` by
-default — split into `## seg-NN <title>` anchors, **one segment per task**; the body is a 4-line
-pointer at one segment:
+Long text lives in a **payload file in your working tree** — **one file per task**, named after the
+task: `commhub_tasks/<round>/<task-slug>.md`. The body is a 4-line pointer at that file:
 
 ```text
-第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
-file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
-branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
+branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
 report_completion once, result <= 400 chars
 ```
 
-`sha12` = the first 12 hex characters of the sha256 of the segment text: it names the revision the
-worker must read. Build the body mechanically — run
-`bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 --summary
-"第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
+**One file per task, and why that is not a style preference**: a worker pulls the branch and reads the
+file the pointer names. If the file holds six tasks, it pays for six tasks' text — the other five are
+tokens spent on somebody else's work, every run, and the pointer cannot tell it where to stop. A
+file per task makes the read cost equal to the task.
+
+`sha12` = the first 12 hex characters of the sha256 of what the pointer names: **the whole file** when
+there is no `seg:`, **the segment** when there is. Build the body mechanically — run
+`bash scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md --summary
+"第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
 and refuses a >80-character summary, a >300-character body, a >6-line body, a code block, an absolute
 path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
 uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
-`bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
-file, missing segment, sha12 mismatch) means **report the conflict**, never work on a guess. Auditing
-a body you already have (a hub row, a draft) is `bash scripts/anet_payload.sh guard --body "…"`, the
-same rule from the same place.
+`bash scripts/anet_payload.sh verify --file … --sha12 …` first (`--seg …` for a segment pointer); a
+non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never work
+on a guess. Auditing a body you already have (a hub row, a draft) is
+`bash scripts/anet_payload.sh guard --body "…"`, the same rule from the same place.
+
+Segment pointers stay supported — `compose --file … --seg seg-NN` prints
+`file: …  seg: seg-NN  sha12: <segment hash>` — for a task that is one section of a document you
+must not split (a spec chapter, a runbook). Then the worker must locate the segment, and it reads the
+neighbours: use it when the document's unity is worth more than the worker's context, not by default.
 
 Why it is correctness, not cosmetics: `sessions.task` keeps the first 200 characters cut blindly (the
 node card, `get_all_status`, `/api/status`), and `report_status(status="working")` matches the body
 **byte-for-byte** — a long body is a long thing for the worker to reproduce without drifting, and a
 drift rots the task in `acked` (§3). The default 4-line pointer is 240-280 characters, so the preview
-holds line 1 and the `file:`/`seg:`/`sha12:` line (they end near character 95) and cuts the tail of
+holds line 1 and the `file:`/`sha12:` line (they end near character 95) and cuts the tail of
 line 3 — the part the card must carry is at the front, which is the point. Self-containment still
 holds: goal, steps and acceptance criteria live **inside the named segment**. Read
 `references/payload-files.md` for the segment format, the guards, the handoff routes and the failure
@@ -284,8 +294,10 @@ calls in it. Between them you do local work (read files, run the tests), which c
    `message_id` in the response (which is the `task_id`). **One task at a time** — a node has one
    session slot (§7, Gotchas).
 3. **Read the pointer** (local, not a commhub call): a dispatched body is normally
-   `file: … seg: seg-NN sha12: …` (§1.2). `git pull`, locate the segment, and verify it:
-   run `bash scripts/anet_payload.sh verify --file <path> --seg seg-NN --sha12 <sha12>`. A mismatch, a missing
+   `file: … sha12: …` (§1.2, one file per task) and sometimes `file: … seg: seg-NN sha12: …`.
+   `git pull`, and verify it:
+   run `bash scripts/anet_payload.sh verify --file <path> --sha12 <sha12>` (add `--seg seg-NN` when the
+   pointer names a segment). A mismatch, a missing
    segment, or a missing file is a **conflict to report**, not a licence to guess: take the task,
    start it, and state the conflict in `result`.
 4. **Acknowledge** (own round): `ack_inbox(alias=<self>, message_id=<task_id>)` per task, optionally
@@ -323,7 +335,8 @@ calls in it. Between them you do local work (read files, run the tests), which c
   actually reads; choosing the wrong one strands the round (§7.0).
 - One commhub call per round (§1.1); a `get_inbox` + `ack_inbox` + `report_status` fired in one turn
   is the fastest way to lose track of which transition the hub accepted.
-- Verify the payload file (path + segment + sha12) before working; report a mismatch instead of
+- Verify the payload file (file + sha12, plus the segment when the pointer names one) before working;
+  report a mismatch instead of
   working on the wrong revision.
 - When the task contradicts the repository (say, the file to delete does not exist), **state the
   conflict in `result`** — don't unilaterally widen the change.
@@ -354,8 +367,9 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
   overwrites the single session slot. Local calls (files, git, bash) are unlimited.
 - **Keep the body short** (§1.2, ≤300 characters). The body is echoed back byte-for-byte by the
   worker in `report_status`, so every paragraph you paste into the parameter multiplies the chance of
-  a drift that stalls the task in `acked`. Long text goes in a payload file; the parameter carries
-  `file:` + `seg:` + `sha12:`.
+  a drift that stalls the task in `acked`. Long text goes in a payload file — **one file per task**, so
+  the worker never reads a neighbour's spec; the parameter carries `file:` + `sha12:` (and `seg:` only
+  for a segment pointer).
 - `report_completion(task=…)`: matching: **`task_id` first; on a miss, `to_name=alias AND
   content=<body>`**, taking the most recent match.
 - `report_status(task=…, status="working")` flips a task to running **only** on
@@ -456,7 +470,7 @@ version **≥ 0.9.0-preview.67** (on 0.9.0-preview.64/65/66 node tokens could no
 - Query: `requirements_list(q=…, tag=…, status=…)`, `requirements_get(id or "#N")`.
 
 The same two rules apply here: one `requirements_*` call per round (§1.1), and a short
-`name` / `description` that points at a payload file plus its segment (§1.2) instead of a pasted
+`name` / `description` that points at a payload file (§1.2) instead of a pasted
 requirement document.
 
 **Upgrade note**: `anet hub start --version <v>` only affects a **fresh start** (an already-running

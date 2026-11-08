@@ -248,6 +248,56 @@ run reply "$TASK4" "seg-01 done: 3 unit tests green" >/dev/null
 [ "$(task_status "$TASK4")" = "replied" ] || { echo "expected replied"; exit 1; }
 echo "   short body round-tripped byte-exactly: acked -> running -> replied"
 
+echo "== one file per task: the pointer names a FILE, so its sha12 is the FILE's hash"
+FILE_TASK="commhub_tasks/e2e/export-tests.md"
+cat > "$PROJ/$FILE_TASK" <<'EOF'
+# e2e 导出测试
+
+为 exportRows() 补 3 个用例，覆盖空输入、单行、超长行。
+把新增用例挂在现有导出测试模块下。
+
+验收: 3 个用例全绿，失败时报错指向具体行号。
+EOF
+( cd "$PROJ" && git add -A && git -c user.email=e2e@local -c user.name=e2e commit -qm "task file" )
+POINTER5="$("$SKILL_DIR/scripts/anet_payload.sh" compose --project-root "$PROJ" --file "$FILE_TASK" \
+  --summary "e2e 导出测试：给导出函数补单元测试，3 个用例全绿" --branch "$BRANCH" --json 2>/dev/null)"
+BODY5="$(printf '%s' "$POINTER5" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
+SHA5="$(printf '%s' "$POINTER5" | python3 -c 'import json,sys;print(json.load(sys.stdin)["sha12"])')"
+[ -n "$BODY5" ] || { echo "compose produced no body for the per-task file"; exit 1; }
+case "$BODY5" in
+  *"seg:"*) echo "a whole-file pointer carries a seg: field"; exit 1 ;;
+esac
+case "$BODY5" in *"file: $FILE_TASK"*) ;; *) echo "the pointer does not name the task's own file"; exit 1 ;; esac
+# the hash must be the whole file's, computed here by an independent algorithm
+EXPECT5="$(python3 -c "import hashlib,sys;t=open(sys.argv[1],encoding='utf-8').read().rstrip(chr(10));print(hashlib.sha256(t.encode('utf-8')).hexdigest()[:12])" "$PROJ/$FILE_TASK")"
+[ "$SHA5" = "$EXPECT5" ] || { echo "pointer sha12 $SHA5, the file hashes to $EXPECT5"; exit 1; }
+"$SKILL_DIR/scripts/anet_payload.sh" verify --project-root "$PROJ" --file "$FILE_TASK" --sha12 "$SHA5" >/dev/null \
+  || { echo "verify refused the correct whole-file sha12"; exit 1; }
+set +e
+"$SKILL_DIR/scripts/anet_payload.sh" verify --project-root "$PROJ" --file "$FILE_TASK" --sha12 000000000000 >/dev/null 2>&1
+RC=$?; set -e
+[ "$RC" = 3 ] || { echo "verify accepted a whole-file sha12 that does not match (exit $RC)"; exit 1; }
+echo "   whole-file pointer (no seg:), sha12 $SHA5 matches an independent sha256; a wrong sha exits 3"
+echo "   a neighbour's task text is not in this file: $(grep -c 'seg-' "$PROJ/$FILE_TASK") segment anchors"
+
+# the per-task pointer must move a real task through the hub, byte-for-byte
+TASK5=$(python3 - "$HUB" "$UTOK" "$NET" "$BODY5" <<'PY'
+import json, sys, urllib.request
+hub, utok, net, body = sys.argv[1:5]
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": body, "network_id": net}).encode())
+print(json.load(urllib.request.urlopen(req))["task_id"])
+PY
+)
+run ack "$TASK5" >/dev/null
+run working "$TASK5" 10 >/dev/null
+[ "$(task_status "$TASK5")" = "running" ] || { echo "the per-task pointer did not flip the task to running"; exit 1; }
+run reply "$TASK5" "done: 3 unit tests green, report in the task file's directory" >/dev/null
+[ "$(task_status "$TASK5")" = "replied" ] || { echo "expected replied"; exit 1; }
+echo "   per-task pointer round-tripped: acked -> running -> replied"
+
 echo "== attachments: a task carries a file through the hub, the manual node pulls it"
 SPEC="$WORK/attach-spec.md"
 printf '%s\n' '# 附件规格' '' '## seg-01 附件里的规格正文' '这一段的正文由 hub 传输，不走两台机器的磁盘。' > "$SPEC"

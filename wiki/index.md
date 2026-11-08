@@ -7,3 +7,4 @@ Evidence-linked draft patterns for skill maintenance. Do not load this file at r
 - [manager-node-identity](patterns/manager-node-identity.md) — draft
 - [portable-protocol-content](patterns/portable-protocol-content.md) — draft
 - [hub-attachment-route-for-manual-nodes](patterns/hub-attachment-route-for-manual-nodes.md) — draft
+- [one-task-one-payload-file](patterns/one-task-one-payload-file.md) — draft

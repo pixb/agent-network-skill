@@ -30,6 +30,12 @@
 #                    wrong sha12 is refused, that an over-long summary is
 #                    refused, and that the short body round-trips byte-exactly
 #                    through acked -> running -> replied
+#   whole-file-pointer one task = one file (SKILL.md §1.2). The pointer is built with no --seg, so
+#                    it names the FILE and carries the file's sha12; the scenario asserts the pointer
+#                    has no `seg:` field, names the task's own file, that its sha12 equals an
+#                    independently computed sha256(file)[:12], that verify accepts it and refuses a
+#                    wrong one (exit 3), that the file holds no other task's text (no segment
+#                    anchors), and that the pointer round-trips acked -> running -> replied
 #
 # The result JSON is: {"scenario", "ok", "final_status", "transitions": [...],
 #                      "verdicts": [...], "error": null}
@@ -195,6 +201,59 @@ EOF
     || fail "anet_payload.sh compose refused a body it must accept: $POINTER_JSON"
   BODY="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
   [ -n "$BODY" ] || fail "compose produced no body text"
+fi
+if [ "$SCENARIO" = "whole-file-pointer" ]; then
+  # One task = one file. No --seg: the pointer names the file, and its sha12 is the FILE's hash.
+  TASK_FILE="commhub_tasks/r01/import-tests.md"
+  mkdir -p "$PROJ/commhub_tasks/r01"
+  cat > "$PROJ/$TASK_FILE" <<'EOF'
+# 导入模块单元测试
+
+步骤：为 readRows() 补 3 个用例，覆盖空文件、重复表头、超长行。
+把新增用例挂在现有导入测试模块下。
+
+验收: 3 个用例全绿，且失败时报错指向具体行号。
+EOF
+  (
+    cd "$PROJ" && git init -q . && printf '.anet/\n' > .gitignore && git add -A &&
+    git -c user.email=scenario@local -c user.name=scenario commit -qm "task file"
+  ) || fail "could not create a git project for the task file"
+  BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD)"
+  POINTER_JSON="$("$PAYLOAD_SH" compose --project-root "$PROJ" --file "$TASK_FILE" \
+      --summary "第1轮 导入测试：给导入模块补单元测试，3 个用例全绿" --branch "$BRANCH" --json 2>/dev/null)" \
+    || fail "anet_payload.sh compose refused a whole-file body it must accept: $POINTER_JSON"
+  BODY="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"])')"
+  SHA12="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["sha12"])')"
+  [ -n "$BODY" ] || fail "compose produced no body text"
+
+  # The pointer must name THIS task's file, and must not carry a segment field.
+  case "$BODY" in *"file: $TASK_FILE"*) check "pointer_names_the_task_file" true ;;
+                 *) fail "the pointer does not name the task's own file: $BODY" ;; esac
+  case "$BODY" in *"seg:"*) fail "a whole-file pointer carries a seg: field: $BODY" ;;
+                  *) check "pointer_has_no_segment_field" true ;; esac
+
+  # The fingerprint is the file's own hash, computed here by an independent algorithm.
+  EXPECT_SHA="$(python3 -c 'import hashlib,sys
+raw = open(sys.argv[1], encoding="utf-8").read().rstrip("\n")
+print(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12])' "$PROJ/$TASK_FILE")"
+  [ "$SHA12" = "$EXPECT_SHA" ] \
+    || fail "the pointer names sha12 $SHA12, the file hashes to $EXPECT_SHA"
+  check "whole_file_sha12_matches_independent_hash" true
+
+  # A worker can prove it, and refuses a revision that is not this one.
+  "$PAYLOAD_SH" verify --project-root "$PROJ" --file "$TASK_FILE" --sha12 "$SHA12" >"$WORK/verify.log" 2>&1 \
+    || fail "verify refused the correct whole-file sha12: $(tail -1 "$WORK/verify.log")"
+  check "verify_accepts_the_whole_file_sha12" true
+  if "$PAYLOAD_SH" verify --project-root "$PROJ" --file "$TASK_FILE" --sha12 000000000000 >"$WORK/badsha.log" 2>&1; then
+    fail "verify accepted a whole-file sha12 that does not match"
+  fi
+  grep -qi "MISMATCH" "$WORK/badsha.log" \
+    || fail "verify did not name the sha12 conflict: $(tail -1 "$WORK/badsha.log")"
+  check "verify_refuses_a_wrong_whole_file_sha12" true
+
+  # The point of the rule: nothing in this file belongs to another task.
+  check "task_file_carries_no_other_task" "$([ "$(grep -c 'seg-' "$PROJ/$TASK_FILE")" = 0 ] && echo true || echo false)"
+  record_verdict "pointer names the task's own file ($(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])') chars, sha12 $SHA12)"
 fi
 TASK_ID="$(dispatch "$BODY")"
 record "dispatched"

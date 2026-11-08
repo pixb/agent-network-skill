@@ -16,14 +16,17 @@
 # worker never works on the wrong revision of the file.
 #
 # usage:
-#   anet_payload.sh compose --file <relpath> --seg <seg-id> --summary "<=80 chars>"
+#   anet_payload.sh compose --file <relpath> --summary "<=80 chars" [--seg <seg-id>]
 #                           [--accept "<one line>"] [--deliver "<one line>"]
 #                           [--branch <name>] [--max 300] [--json]
-#       prints the exact text to pass as send_task(task=…)
-#   anet_payload.sh verify  --file <relpath> --seg <seg-id> [--sha12 <expected>]
+#       prints the exact text to pass as send_task(task=…). WITHOUT --seg the unit is the whole
+#       file, which is the default shape: one task, one file, so the worker reads only its task.
+#       WITH --seg the unit is that segment (legacy multi-task files, and tasks that are one
+#       section of a bigger document) — and then the sha12 is the SEGMENT's hash, not the file's.
+#   anet_payload.sh verify  --file <relpath> [--seg <seg-id>] [--sha12 <expected>]
 #                           [--print-body] [--json]
-#       worker side: proves the file, the segment and the revision are the ones
-#       the task pointed at; exits non-zero when they are not
+#       worker side: proves the file (or the named segment) is the revision the task pointed at;
+#       exits non-zero when it is not
 #   anet_payload.sh list    --file <relpath> [--json]
 #       segment ids, titles and character counts
 #   anet_payload.sh guard   --body "<text>" [--max 300] [--summary-max 80] [--json]
@@ -172,6 +175,19 @@ def segment(idx):
 
 out = {'file_ok': True, 'segments': [{'seg': a[1], 'title': a[2], 'line': a[0] + 1} for a in anchors]}
 
+# One task = one file. When no segment is named, the unit is the WHOLE file: its text, its
+# character count, its sha12. The reason is a token cost, not aesthetics — a worker that pulls a
+# file holding several tasks reads every other task's text on every run, and `sessions.task` only
+# keeps 200 characters, so the pointer cannot tell it which part to skip.
+whole = raw.rstrip('\n')
+out['mode'] = 'file'
+out['whole_chars'] = len(whole)
+out['whole_sha12'] = hashlib.sha256(whole.encode('utf-8')).hexdigest()[:12]
+if not seg_arg:
+    out['body'] = whole
+    out['chars'] = len(whole)
+    out['sha12'] = out['whole_sha12']
+
 if anchors:
     want = norm(seg_arg)
     hits = [i for i, a in enumerate(anchors) if a[1] == want]
@@ -191,7 +207,6 @@ elif seg_arg:
 if sha_arg:
     out['sha_expected'] = sha_arg.strip().lower()
     out['sha_match'] = bool(out.get('sha12')) and out['sha12'] == out['sha_expected']
-
 print(json.dumps(out, ensure_ascii=False))
 PY
 }
@@ -394,21 +409,28 @@ PY
 esac
 
 if [ "$CMD" = "verify" ]; then
-  [ -n "$SEG" ] || die "verify needs --seg <seg-id>"
-  if [ -n "$(SEG_JSON missing_seg)" ]; then
+  # `--seg` is optional: with no segment named, the unit is the whole file (one task = one file).
+  if [ -n "$SEG" ] && [ -n "$(SEG_JSON missing_seg)" ]; then
     die "the task points at $(SEG_JSON missing_seg), which the file does not contain — report the conflict, do not guess" 3
   fi
-  if [ -n "$(SEG_JSON no_anchors)" ]; then
+  if [ -n "$SEG" ] && [ -n "$(SEG_JSON no_anchors)" ]; then
     die "$FILE has no '## seg-NN' anchors — the pointer has nothing to point at" 3
   fi
   ACTUAL="$(SEG_JSON sha12)"
   EXPECT="${SHA12:-$(SEG_JSON sha_expected)}"
+  if [ -n "$EXPECT" ] && [ -z "$ACTUAL" ]; then
+    die "the file produced no sha to compare — pass --seg <seg-id> for a segment-level check" 3
+  fi
   if [ "$JSON" = 1 ]; then
     if [ -n "$EXPECT" ] && [ "$EXPECT" != "$ACTUAL" ]; then echo "$META"; exit 3; fi
     echo "$META"; exit 0
   fi
   echo "file   : $FILE"
-  echo "segment: $(SEG_JSON seg)  ($(SEG_JSON chars) chars)"
+  if [ -n "$SEG" ]; then
+    echo "segment: $(SEG_JSON seg)  ($(SEG_JSON chars) chars)"
+  else
+    echo "unit   : the whole file  ($(SEG_JSON chars) chars)"
+  fi
   echo "sha12  : $ACTUAL${EXPECT:+  expected $EXPECT}"
   if [ -n "$EXPECT" ] && [ "$EXPECT" != "$ACTUAL" ]; then
     echo "MISMATCH — this file is not the revision the task pointed at."
@@ -431,18 +453,25 @@ PY
 fi
 
 # ── compose ───────────────────────────────────────────────────────────────
-[ -n "$SEG" ] || die "compose needs --seg <seg-id>"
+# No --seg = the unit is the WHOLE file. That is the default shape now: one task, one file, so the
+# worker reads its own task and nobody else's text.
 [ -n "$SUMMARY" ] || die "compose needs --summary \"<one line>\""
-if [ -n "$(SEG_JSON missing_seg)" ]; then die "the file has no segment $(SEG_JSON missing_seg)" 2; fi
-if [ -n "$(SEG_JSON no_anchors)" ]; then die "$FILE has no '## seg-NN' anchors — split it first" 2; fi
-if [ "$(SEG_JSON duplicate_anchor)" = "true" ]; then warn "segment $SEG appears more than once in $FILE — segment ids must be unique"; fi
+if [ -n "$SEG" ]; then
+  if [ -n "$(SEG_JSON missing_seg)" ]; then die "the file has no segment $(SEG_JSON missing_seg)" 2; fi
+  if [ -n "$(SEG_JSON no_anchors)" ]; then die "$FILE has no '## seg-NN' anchors — split it first" 2; fi
+  if [ "$(SEG_JSON duplicate_anchor)" = "true" ]; then warn "segment $SEG appears more than once in $FILE — segment ids must be unique"; fi
+fi
 
 SEGSHA="$(SEG_JSON sha12)"
 SEGCHARS="$(SEG_JSON chars)"
 SUMCHARS="$(nchars "$SUMMARY")"
 [ "$SUMCHARS" -le "$SUMMARY_MAX" ] || die "the summary line is $SUMCHARS chars (max $SUMMARY_MAX): sessions.task keeps only the first 200 chars and cuts blindly"
 
-ACCEPT="${ACCEPT:-accept: every item on the segment acceptance list}"
+if [ -n "$SEG" ]; then
+  ACCEPT="${ACCEPT:-accept: every item on the segment acceptance list}"
+else
+  ACCEPT="${ACCEPT:-accept: every item on the acceptance list in the file}"
+fi
 DELIVER="${DELIVER:-report_completion once, result <= 400 chars}"
 BRANCH_LINE=""
 if [ -n "$BRANCH" ]; then BRANCH_LINE="branch $BRANCH (git pull first); "; fi
@@ -452,9 +481,11 @@ import json, sys
 summary, rel, meta_json, sha, branch_line, accept, deliver = sys.argv[1:8]
 meta = json.loads(meta_json)
 seg = meta.get('seg', '')
+# One task = one file: with no segment named, the pointer names the file and the file's sha12.
+pointer = f"file: {rel}  seg: {seg}  sha12: {sha}" if seg else f"file: {rel}  sha12: {sha}"
 lines = [
     summary.strip(),
-    f"file: {rel}  seg: {seg}  sha12: {sha}",
+    pointer,
     f"{branch_line}work it in your own working directory; {accept}",
     deliver.strip(),
 ]
@@ -502,4 +533,4 @@ fi
 
 printf '%s\n' "$BODY"
 warn "body: $(nchars "$BODY") chars, ${SUMCHARS} on line 1 — one commhub call this round (SKILL.md §1.1)"
-warn "worker side: anet_payload.sh verify --file $FILE --seg $SEG --sha12 $SEGSHA"
+warn "worker side: anet_payload.sh verify --file $FILE${SEG:+ --seg $SEG} --sha12 $SEGSHA"

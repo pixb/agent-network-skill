@@ -36,13 +36,42 @@ file, or a path the other machine cannot open — by shape: a leading `/` (POSIX
 drive path `X:\` / `X:/`, or a UNC share `\\host\share`. `scripts/anet_payload.sh guard` names them
 by shape, so the rule never encodes one machine's mount prefix.
 
-## Payload file and segment format
+## Payload file: one file per task
 
-Default location (any project-relative directory works; name it in the body):
+Default location (any project-relative directory works; name it in the body) — **one task, one file,
+named after the task**, not one file per round:
 
-    commhub_tasks/<round-id>/spec.md
+    commhub_tasks/<round-id>/<task-slug>.md
 
-Split it into segments with an anchor heading:
+Why a file per task, in measured terms: the worker `git pull`s and reads the file the pointer names.
+A file holding six tasks costs it six tasks' text on every run — five of them are tokens spent on
+somebody else's work — and a task body of ≤300 characters cannot tell it where to stop. One file per
+task makes the read cost equal to the task. It also makes the fingerprint trivially unambiguous: the
+pointer names a file, and the hash is the file's.
+
+File shape (plain markdown, the acceptance list at the bottom):
+
+```markdown
+# 导出模块：单元测试
+
+为 exportRows() 补 3 个用例，覆盖空输入、单行、超长行。
+把新增用例挂在现有测试目录的导出测试模块下。
+
+验收: 3 个用例全绿，失败时报错指向具体行号。
+```
+
+Rules the tooling depends on:
+
+- **One file = one task** (SKILL.md §1, "one task, one deliverable").
+- **sha12 = first 12 hex of `sha256(file text)`** — trailing newlines dropped, LF newlines. It is the
+  revision fingerprint: it proves the worker is reading the revision the dispatcher meant.
+- `anet_payload.sh compose` with no `--seg` emits `file: …  sha12: <file hash>`; `verify` with no
+  `--seg` compares the file hash.
+
+## Segment pointers (the supported second shape)
+
+A task that is one section of a document you must not split — a spec chapter, a runbook, a report with
+shared preamble — keeps the segment form. Split the file with an anchor heading:
 
 ```markdown
 # 第 7 轮：导出模块
@@ -56,19 +85,30 @@ Split it into segments with an anchor heading:
 验收: 文档构建通过，示例可复制运行。
 ```
 
-Rules the tooling depends on:
-
-- **One segment = one task** (SKILL.md §1, "one task, one deliverable").
 - Segment ids are `seg-NN`, zero-padded, unique inside the file. `seg-2` is accepted and normalized
   to `seg-02`.
-- The anchor is a markdown heading (`#`…`######`) whose first token is the segment id; the rest of
-  the line is the title.
+- The anchor is a markdown heading (`#`…`######`) whose first token is the segment id; the rest of the
+  line is the title.
 - **Segment text** = the anchor line through the line before the next anchor, leading/trailing blank
   lines dropped, each line right-stripped, LF newlines.
-- **sha12** = the first 12 hex characters of `sha256(segment text)`. It is the revision fingerprint:
-  it proves the worker is reading the exact file revision the dispatcher meant.
+- **sha12 = first 12 hex of `sha256(segment text)`** — the SEGMENT's hash, never the whole file's.
+  (A node that reports a whole-file hash against a segment pointer is using the wrong measure: re-run
+  `verify --seg` and quote its output line.)
+- Cost, stated plainly: every other segment in that file is read too. Use this shape when the
+  document's unity is worth more than the worker's context.
 
 ## The pointer body (four lines)
+
+Whole-file pointer (the default):
+
+```text
+第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
+file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
+branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
+report_completion once, result <= 400 chars
+```
+
+Segment pointer (when the task is one section of a document):
 
 ```text
 第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
@@ -77,31 +117,31 @@ branch main (git pull first); work it in your own working directory; accept: eve
 report_completion once, result <= 400 chars
 ```
 
-Line 1 is the one-line summary (≤80 chars, a complete sentence). This body is 258 characters, so
-`sessions.task` — which keeps the first 200, cut blindly — shows line 1, the whole
-`file:`/`seg:`/`sha12:` line (it ends near character 95) and the head of line 3: the part a reader
-needs is inside the cut, and the tail is not.
+Line 1 is the one-line summary (≤80 chars, a complete sentence). Both bodies are 240–280 characters,
+so `sessions.task` — which keeps the first 200, cut blindly — shows line 1, the whole
+`file:`/`sha12:` line (it ends near character 95) and the head of line 3: the part a reader needs is
+inside the cut, and the tail is not.
 
 A pointer is **not** an excuse for a vague task: the goal, the steps and the acceptance criteria all
-live **inside the named segment**, and the body names the file, the segment, and the acceptance line.
+live **inside the named file** (or segment), and the body names the file and the acceptance line.
 
 ## Building it: `scripts/anet_payload.sh`
 
 Run it (bash + python3; it is local, so it does not spend the round):
 
 ```bash
-# planner — prints the exact text to pass as send_task(task=…)
+# planner — prints the exact text to pass as send_task(task=…). No --seg = the file is the unit.
 bash scripts/anet_payload.sh compose \
-    --file commhub_tasks/r07/spec.md --seg seg-01 \
-    --summary "第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" \
+    --file commhub_tasks/r07/export-tests.md \
+    --summary "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" \
     --branch main
 
 # worker — proves the pointer before touching anything (non-zero exit = conflict)
 bash scripts/anet_payload.sh verify \
-    --file commhub_tasks/r07/spec.md --seg seg-01 --sha12 3f7c64c57fb6 --print-body
+    --file commhub_tasks/r07/export-tests.md --sha12 756d1c7db68e --print-body
 
-# both — what is in the file
-bash scripts/anet_payload.sh list --file commhub_tasks/r07/spec.md
+# both — what is in the file (segments, when a file has them)
+bash scripts/anet_payload.sh list --file commhub_tasks/r07/export-tests.md
 
 # anyone — audit a body you already have (a hub row, a draft) against the same rule
 bash scripts/anet_payload.sh guard --body "$(printf '%s' "$TASK_BODY")"
@@ -172,13 +212,13 @@ ANET_TOKEN=… bash scripts/anet_payload.sh upload --file commhub_tasks/r07/spec
 #   sha12: 54b3cd5aa536
 #   put on the pointer line:  attachment: 3c63099f…  sha12: 54b3cd5aa536
 #   and in the dispatch:  meta.attachments = [{type: "file", file_id: "3c63099f…", …}]
-bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 \
-    --summary "第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" --allow-untracked
+bash scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md \
+    --summary "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --allow-untracked
 # then send_task(alias=…, task=<the pointer, with `attachment: <file_id>` added>,
 #                meta={attachments: [{type: "file", file_id: "<file_id>"}]})
 # Underneath, `upload` is one multipart POST — this is the shape it sends, for when you
 # must debug it by hand:
-#   curl -sS -K - -F "file=@commhub_tasks/r07/spec.md;type=text/markdown" "$COMMHUB_URL/api/upload"
+#   curl -sS -K - -F "file=@commhub_tasks/r07/export-tests.md;type=text/markdown" "$COMMHUB_URL/api/upload"
 #   (the config on stdin carries the Authorization header, so the secret stays off argv)
 
 # worker (runtime node): fetch-attachment.ts pulls it automatically and hands the
@@ -195,11 +235,12 @@ and `compose` says so in the same breath ("…or deliver it as a hub attachment"
 ## Worker side, in order
 
 1. `git pull` (or `anet_manual_node.sh fetch <file_id> --out … --sha12 …` for an attachment).
-2. Run `bash scripts/anet_payload.sh verify --file … --seg … --sha12 … --print-body`.
+2. Run `bash scripts/anet_payload.sh verify --file … --sha12 … --print-body` (add `--seg …` when the
+   pointer names a segment).
 3. If it refuses: take the task anyway (`ack` → `working`) and state the conflict in
    `report_completion(result=…)`; do not work on a guess and do not widen the change.
-4. Work the printed segment. Write the deliverable and the long report into the segment's 产出
-   section, commit, push.
+4. Work the file the pointer names. Write the deliverable and the long report where the task asks for
+    it, commit, push.
 5. `report_completion` once, with a ≤400-character `result`: conclusion, what you ran to verify it,
    and the path of the long report.
 
