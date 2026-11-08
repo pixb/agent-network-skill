@@ -43,3 +43,19 @@ itself — `--json` carrying the byte length next to the character length — so
 arithmetic comparison inside one program, with no locale-dependent pipe in it. That is the next
 change; a gate that measures the runner's environment is worse than no gate, because it fails
 loudly for a reason the protocol does not control.
+
+## Eval commands are executed by `sh -c`, from the skill directory (measured v0.6.8)
+
+`scripts/run_evals.py` runs a criterion's `cmd` through `subprocess.run(cmd, shell=True, cwd=<skill dir>)`.
+Two consequences measured the hard way while adding the delivery-budget criteria:
+
+- a heredoc command (`python3 - <<'PY' … PY`) is a single JSON string with embedded newlines, and the
+  two criteria written that way failed under the factory's invocation; rewritten as a one-line
+  `python3 -c "…"` with balanced quotes they pass
+- the body inside a criterion must respect the rule it measures: the first synthetic delivery body had
+  no newlines, so its line 1 was 1200 characters, `guard` refused it for the line-1 budget, and the
+  criterion measured its own test data instead of the script
+
+Write criteria as arithmetic comparisons inside one program (1200 accepted, 1201 refused), never as a
+locale-dependent pipe through a shell count — the deleted `guard-counts-characters-not-bytes` criterion
+was measuring the runner, not the script.
