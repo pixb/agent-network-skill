@@ -302,6 +302,12 @@ calls in it. Between them you do local work (read files, run the tests), which c
    `result` is ≤400 characters: conclusion, how it was verified, and the path of the long report —
    the long report goes in the file (in the segment's 产出 section), not in the parameter.
    Merging several tasks into one report = none of them take effect.
+   **`report_completion` is invisible to a person.** It writes `completions` + `tasks.result` only —
+   no `inbox` row for the dispatcher, no `user_inbox` row, no unread badge; the Tasks page is the only
+   place it shows. Have the dispatcher **read** the result with `send_reply` (manual node: `reply …
+   --via send_reply`), which is **terminal** — `replied` is not retryable, so never ask a question that
+   way. Notify a **person** mid-task with `report_status(status="blocked")` + `send_desktop_message`
+   (manual node: `dm`) and keep the task `running`. Channel table: §7.0 — cite it, do not copy it.
 7. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
    session to idle).
 8. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
@@ -312,6 +318,9 @@ calls in it. Between them you do local work (read files, run the tests), which c
 - Report after the work is done, not before; every verification you claim in `result` must have
   actually been run.
 - One completion per task; never merge several tasks into one report.
+- Delivering the work and notifying a person are **different calls**: `report_completion` closes the
+  task where only the Tasks page can see it, `send_reply` / `send_desktop_message` are what a human
+  actually reads; choosing the wrong one strands the round (§7.0).
 - One commhub call per round (§1.1); a `get_inbox` + `ack_inbox` + `report_status` fired in one turn
   is the fastest way to lose track of which transition the hub accepted.
 - Verify the payload file (path + segment + sha12) before working; report a mismatch instead of
