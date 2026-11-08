@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.5
+  version: 0.6.6
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.5
+  version: 0.6.6
   created: 2026-10-07
 ---
 
@@ -752,3 +752,29 @@ target repo, is a **timed-out task, not a delivery**. Resend it as a **new task*
   or the segment sha12 does not match. `bash scripts/anet_payload.sh compose` refuses to build such a body, and
   `verify` refuses to work from it; the worker reports the conflict in `result` (never works on a
   guess). Push the branch, or ship it as a hub attachment with its `file_id` (§4).
+
+### 7.6 派工验收行必含「生成前词面自检」条款（v0.6.6，2026-11-08 两笔到货因旧词面被打回）
+
+事故：同一晚两笔到货（029 `d80b58d5daa1` commit `cef15af`、077 `675354b73a08` commit `29552f5`）
+数值与形态俱佳，但日志 `prompt_sha256` 分别等于**第 6 轮旧词面**与**当日 01:14 旧版词面**——
+节点在自己的 working directory 里沿用了本机旧提示词，派工词面与 seed 段双双未落实 ⇒ 按三证硬项打回（无豁免）。
+
+**派工侧硬条款**（写进 payload 段的验收清单第 0 项，不是写进任务正文）：
+
+```
+0. 生成前词面自检：git pull --ff-only 后
+   sha256sum assets/prompts/<本段>.txt | cut -c1-12
+   逐字＝本段指定的 raw sha12 才可出图；不一致立刻回报
+   「词面不符：本机 xxxxxxxx ≠ 指定 yyyyyyyyyy」并停止出图。
+   回报里必须带上你实际使用的 raw sha12。
+```
+
+**为什么放在 payload 而不是任务正文**：正文四行是固定结构（摘要＋指针＋branch＋report 要求），
+条款属验收清单；正文只补一句提示（`派工 context` 里点名 raw sha12 自检），保持单调用与短正文。
+
+**验收侧配套**（image-qa-loop-skill §2.18.42）：`log_prompt_sha256_equals_dispatch_strip: False` 时
+用 git 历史 strip 比对做溯源，定位节点实际使用的词面版本并写进台账 `prompt_sha12`（注明「非派工版」）；
+同 seed 同词面重跑出不同图属引擎非确定性，**不得**当作可复现证据。
+
+**回报字段**（manual node 的 `report_completion` 结果里应包含）：
+`seed=<逐字> raw_sha12=<逐字> sha12=<图> commit=<hash>`，四值齐才可进入验收；缺 raw_sha12 视为回报不合格。
