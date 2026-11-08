@@ -10,7 +10,7 @@
     "status:replied"
   ],
   "verdicts": [
-    "pointer names the task's own file (255 chars, sha12 ebdcc65c69cb)"
+    "pointer names the task's own file (sha12 ebdcc65c69cb, 256 chars within the 300-character budget)"
   ],
   "checks": {
     "pointer_names_the_task_file": true,
@@ -19,6 +19,7 @@
     "verify_accepts_the_whole_file_sha12": true,
     "verify_refuses_a_wrong_whole_file_sha12": true,
     "task_file_carries_no_other_task": true,
+    "pointer_within_dispatch_budget": true,
     "task_reaches_replied": true,
     "result_stored_on_task_row": true,
     "transitions_observed": true,

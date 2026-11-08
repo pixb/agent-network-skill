@@ -24,12 +24,44 @@ the repo, and the same pointer keeps working after `retry_task`.
 
 ## Budgets
 
-| argument | budget |
-|---|---|
-| `send_task(task=…)` | ≤ 300 characters, ≤ 6 lines, line 1 ≤ 80 chars |
-| `send_task(context=…)` | ≤ 200 characters, one line (project + branch + "in your working directory") |
-| `send_message(message=…)` / `broadcast(message=…)` | ≤ 200 characters |
-| `report_completion(result=…)` | ≤ 400 characters (the row stores 4000; do not use them all) |
+| argument | budget | hub ceiling (measured) |
+|---|---|---|
+| `send_task(task=…)` | ≤ 300 characters, ≤ 6 lines, line 1 ≤ 80 chars | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(context=…)` | ≤ 200 characters, one line (project + branch + "in your working directory") | — |
+| `send_message` / `broadcast` / `send_reply` | ≤ 1500 characters, line 1 ≤ 80 | 10 000 (`send_reply` text) |
+| `report_completion(result=…)` | ≤ 1200 characters, line 1 ≤ 80 | stores the first 4000 |
+
+The budgets are **discipline, not limits**: the dispatch body has to be echoed byte-for-byte by the
+worker, and a node card shows only a blind 200-character slice, so a longer body buys no display and
+adds drift. The delivery body is capped at 1200 because the task pane collapses at ≈12 lines ("What
+renders where" below).
+
+## What renders where (measured on the Dashboard, 2026-11-09)
+
+The same text lands on surfaces with **different renderers**, so the format rule is written for the
+worst surface, not the best one:
+
+| surface | renderer | visible | measured at |
+|---|---|---|---|
+| node card (current task) | plain text | `line-clamp-2` → 2 lines, of a **blind 200-character** hub slice | `app/nodes/NodesView.tsx:803` |
+| node list row / compact grid | plain text | `truncate` → 1 line (`title` carries the rest) | `NodesView.tsx:872`, `:927` |
+| node rail | plain text | 1 line; a draft preview takes 40 characters | `app/components/NodeList.tsx:230`, `:225` |
+| **task pane opened from a node** | **markdown** (`react-markdown` + `remark-gfm`, per-element classes, image lightbox) | collapsed at 300px ≈ 12 lines, expandable | `app/components/TaskChatPanel.tsx:492-493`, `:561`, `m.result :1725`, `m.content :1769`, `COLLAPSE_MAX_PX :601` |
+| Tasks page, task detail | plain text `whitespace-pre-wrap` | `max-h-64` scroll box | `app/components/TaskDetail.tsx:329`, `:345` |
+| Messages page / inbox | plain text `whitespace-pre-wrap` | — | `app/messages/page.tsx:443`, `:488`, `app/messages/inbox/page.tsx:187` |
+
+What follows from that table:
+
+- **Line 1 must be self-sufficient**: list rows show only line 1, a card shows 2 lines, and the hub
+  hands the card a blind slice with no notion of where a line ends.
+- **Use the markdown subset that also reads well as plain text**: a blank line between blocks,
+  `- ` bullets, `key: value` fields (`verdict:` / `tests:` / `report:` / `commit:`).
+- **Never** tables (the task pane renders them, every plain surface shows `|---|`), `#` headings,
+  `**bold**`, backticks. The dashboard had to add a markdown component for comments precisely because
+  `## 归因更正`, `**错误**` and backticks were being shown **as their own characters**
+  (`app/components/CommentMarkdown.tsx`, issue #1831).
+- **Delivery text ≤1200 characters, conclusion inside its first 12 lines** — that is where the task pane
+  collapses. The long report stays in a file.
 
 Never inside a parameter: a markdown spec, a code block, a log, a diff, a table, the content of a
 file, or a path the other machine cannot open — by shape: a leading `/` (POSIX absolute), `~/`, a
@@ -105,7 +137,7 @@ Whole-file pointer (the default):
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 400 chars
+report_completion once, result <= 1200 chars
 ```
 
 Segment pointer (when the task is one section of a document):
@@ -114,7 +146,7 @@ Segment pointer (when the task is one section of a document):
 第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
 branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
-report_completion once, result <= 400 chars
+report_completion once, result <= 1200 chars
 ```
 
 Line 1 is the one-line summary (≤80 chars, a complete sentence). Both bodies are 240–280 characters,
@@ -241,8 +273,9 @@ and `compose` says so in the same breath ("…or deliver it as a hub attachment"
    `report_completion(result=…)`; do not work on a guess and do not widen the change.
 4. Work the file the pointer names. Write the deliverable and the long report where the task asks for
     it, commit, push.
-5. `report_completion` once, with a ≤400-character `result`: conclusion, what you ran to verify it,
-   and the path of the long report.
+5. `report_completion` once, with a ≤1200-character `result` (line 1 = the conclusion): what you ran
+   to verify it, and the path of the long report. Format it with `- ` bullets and `key: value` fields —
+   no tables, headings, bold markers or backticks ("What renders where" below).
 
 ## Failure modes
 

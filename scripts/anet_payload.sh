@@ -6,8 +6,15 @@
 #   · the `task` / `message` argument of a commhub call stays short (<= 300 chars,
 #     <= 6 lines, first line <= 80 chars);
 #   · the long text (spec, steps, acceptance list, code, tables) lives in a file
-#     inside the project working tree, split into `## seg-NN` segments;
-#   · the parameter carries only: relative path + segment id + sha12 + acceptance.
+#     inside the project working tree, one file per task (segments only when the
+#     task really is one section of a document you must not split);
+#   · the parameter carries only: relative path + sha12 (+ seg id) + acceptance.
+#
+# Budgets and the hub's own ceilings (the budgets below are discipline, not limits):
+#   task body      <= 300 chars   hub accepts 10 000 (TASK_CONTENT_MAX)
+#   result body    <= 1200 chars  hub stores the first 4000
+#   message body   <= 1500 chars  hub accepts 10 000 (send_reply text)
+#   line 1         <= 80 chars    sessions.task keeps the first 200, cut blindly
 #
 # Why the sha12 is not decoration: `report_status(status="working", task=…)`
 # matches the stored body byte-for-byte, and `sessions.task` keeps only the first
@@ -29,12 +36,17 @@
 #       exits non-zero when it is not
 #   anet_payload.sh list    --file <relpath> [--json]
 #       segment ids, titles and character counts
-#   anet_payload.sh guard   --body "<text>" [--max 300] [--summary-max 80] [--json]
+#   anet_payload.sh guard   --body "<text>" [--max 300] [--summary-max 80] [--no-markup] [--json]
 #       audit a body you already have (a hub row, a draft): char/line budget, first
 #       line budget, code block, absolute path. It is the same rule the compose
 #       guards apply, so a test can assert the rule against a stored body without
 #       duplicating the pattern — and it counts characters in python, so a C locale
 #       cannot turn a 100-character Chinese body into a 300-byte one.
+#       A delivered result is audited with the delivery budget: --max 1200 --no-markup.
+#       --no-markup refuses the markup that the Dashboard's plain-text surfaces
+#       (node card, node list rows, Tasks detail, Messages) show as raw characters:
+#       tables, `#` headings, `**bold**`, backticks. The task pane is the one surface
+#       that renders markdown, and a table there is paid for by four plain surfaces.
 #   anet_payload.sh upload  --file <relpath> [--hub <url>] [--network <id>]
 #                           [--name <n>] [--mime <m>] [--allow-untracked] [--json]
 #       the dispatcher's half of the hub-attachment route: put these bytes on the hub,
@@ -56,8 +68,11 @@
 #
 # options:
 #   --project-root <dir>  repo that holds the payload file (default: $PWD)
-#   --max <n>            body budget in characters (default 300)
+#   --max <n>            body budget in characters (guard defaults: task 300, result 1200)
+#   --kind task|result   guard: which text is audited; result = the ≤1200 delivery text, line count
+#                        free, markup refused
 #   --summary-max <n>    first-line budget in characters (default 80)
+#   --no-markup          guard only: refuse markup plain-text surfaces cannot render
 #   --allow-dirty         do not refuse a file with uncommitted changes
 #   --allow-untracked     do not refuse a file that is not in git
 #   --force               compose even when a guard rejects the body
@@ -91,8 +106,9 @@ CMD="${1:-}"
 case "$CMD" in -h|--help|help) usage; exit 0 ;; esac
 shift
 
-FILE="" SEG="" SUMMARY="" ACCEPT="" DELIVER="" BRANCH="" MAX="300"
-BODY_ARG="" SUMMARY_MAX="80"
+FILE="" SEG="" SUMMARY="" ACCEPT="" DELIVER="" BRANCH="" MAX=""
+KIND="task"
+BODY_ARG="" SUMMARY_MAX="80" NO_MARKUP=0
 HUB_ARG="" NETWORK="" FNAME="" MIME="application/octet-stream"
 # The hub's own cap, measured in server/src/uploads.ts (MAX_UPLOAD_BYTES). It is stated
 # as a number here so a 40 MB dataset is refused before a byte is put on the wire.
@@ -110,6 +126,8 @@ while [ $# -gt 0 ]; do
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --max) MAX="${2:-}"; shift 2 ;;
     --summary-max) SUMMARY_MAX="${2:-}"; shift 2 ;;
+    --no-markup) NO_MARKUP=1; shift ;;
+    --kind) KIND="${2:-task}"; shift 2 ;;
     --body) BODY_ARG="${2:-}"; shift 2 ;;
     --sha12) SHA12="${2:-}"; shift 2 ;;
     --project-root) PROJECT="${2:-}"; shift 2 ;;
@@ -245,19 +263,38 @@ SEG_JSON() { python3 -c "import json,sys;d=json.loads(sys.argv[1]);v=d.get(sys.a
 # ── the body-shape rule, shared by compose and guard ─────────────────────
 # Prints one line per violation; empty output means the body passes.
 body_violations() {
-  python3 - "$1" "${MAX:-300}" "${SUMMARY_MAX:-80}" <<'PY'
+  python3 - "$1" "${MAX:-300}" "${SUMMARY_MAX:-80}" "${NO_MARKUP:-0}" "${KIND:-task}" <<'PY'
 import re, sys
-body, max_chars, max_first = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+body = sys.argv[1]
+max_chars, max_first, no_markup, kind = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
 lines = body.split("\n")
 violations = []
 if len(body) > max_chars:
     violations.append(f"the body is {len(body)} chars (budget {max_chars}) — the long text belongs in the file, not in the parameter")
-if len(lines) > 6:
+if len(lines) > 6 and kind != "result":
     violations.append(f"the body is {len(lines)} lines (budget 6)")
 if lines and len(lines[0]) > max_first:
     violations.append(f"line 1 is {len(lines[0])} chars (budget {max_first}): sessions.task keeps only the first 200 chars and cuts blindly")
 if '```' in body:
     violations.append("the body contains a code block — code belongs in the payload file")
+if no_markup or kind == "result":
+    # Measured on the Dashboard: the node card (NodesView.tsx line-clamp-2), the node list rows
+    # (truncate), the Tasks detail (TaskDetail.tsx, whitespace-pre-wrap) and the Messages page all
+    # render PLAIN text; only the task pane (TaskChatPanel, react-markdown) renders markdown. So a
+    # table/heading/bold/backtick is paid for by four plain surfaces, where it shows as its own
+    # characters. The subset that reads well everywhere: blank lines, `- ` bullets, `key: value`.
+    for pattern, label in [
+        (r"(?m)^\s*\|.*\|\s*$", "a table row (`| … |`)"),
+        (r"(?m)^\s*#{1,6}\s", "a `#` heading"),
+        (r"\*\*[^*]+\*\*", "`**bold**` markup"),
+        (r"`[^`]+`", "backticks"),
+    ]:
+        if re.search(pattern, body):
+            violations.append(
+                f"the text carries {label}: the node card, node list rows, the Tasks detail and the "
+                "Messages page render plain text, so it appears there as its own characters — use "
+                "blank lines, `- ` bullets and `key: value` fields"
+            )
 # Token classification, not a pattern that can catch the tail of a URL: a path counts
 # when a whitespace-separated token — punctuation stripped — starts with `/` (POSIX
 # absolute), `~/` (home-relative), `X:\` or `X:/` (Windows drive) or `\\host\` (UNC).
@@ -297,6 +334,11 @@ PY
 case "$CMD" in
   guard)
     [ -n "${BODY_ARG:-}" ] || die "guard needs --body \"<text>\""
+    # The budget depends on which kind of text is audited. The hub accepts far more than the protocol
+    # spends (measured in server/src): task 10 000, result stores 4000, send_reply 10 000.
+    if [ -z "$MAX" ]; then
+      if [ "$KIND" = result ]; then MAX=1200; else MAX=300; fi
+    fi
     PROBLEMS="$(body_violations "$BODY_ARG")" || die "guard could not audit the body"
     CHARS="$(nchars "$BODY_ARG")"
     LINES="$(printf '%s' "$BODY_ARG" | python3 -c 'import sys; print(len(sys.stdin.read().split("\n")))')"
@@ -472,7 +514,7 @@ if [ -n "$SEG" ]; then
 else
   ACCEPT="${ACCEPT:-accept: every item on the acceptance list in the file}"
 fi
-DELIVER="${DELIVER:-report_completion once, result <= 400 chars}"
+DELIVER="${DELIVER:-report_completion once, result <= 1200 chars}"
 BRANCH_LINE=""
 if [ -n "$BRANCH" ]; then BRANCH_LINE="branch $BRANCH (git pull first); "; fi
 

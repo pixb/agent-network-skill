@@ -69,3 +69,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/anet_payload.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/one-task-one-payload-file.md`
+
+## 2026-11-08T17:54:46Z — accepted
+
+- Proposal: `budget-and-format-v068`
+- Target: `scripts/anet_payload.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/hub-budget-versus-protocol-budget.md`

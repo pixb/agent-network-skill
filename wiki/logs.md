@@ -21,3 +21,11 @@ Append-only record of pattern maintenance.
 ## 2026-11-08T17:17:26Z — pattern added
 
 - `one-task-one-payload-file`
+
+## 2026-11-08T17:54:46Z — pattern added
+
+- `hub-budget-versus-protocol-budget`
+
+## 2026-11-08T17:54:46Z — pattern added
+
+- `dashboard-plain-text-surfaces`

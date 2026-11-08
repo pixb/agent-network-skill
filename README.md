@@ -64,14 +64,17 @@ universal `~/.agents/skills/`). Use `--platform <name>`, `--project`, `--path <d
 Two rules shape every call (SKILL.md §1.1, §1.2): **one commhub call per round** (one script command
 that performs a single transition may read the hub around it — that is still one round), and **short
 parameters** — the long text lives in a payload file and the parameter carries only
-`file:` + `sha12:` (one task = one file; `seg:` only for a segment pointer):
+`file:` + `sha12:` (one task = one file; `seg:` only for a segment pointer). Budgets: dispatch body
+≤300, delivered `result` ≤1200, message ≤1500, line 1 ≤80 — the hub accepts 10 000 / stores 4000, so
+these are discipline, not limits:
 
 ```bash
 ./scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md \
     --summary "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --branch main   # planner
 ./scripts/anet_payload.sh verify  --file commhub_tasks/r07/export-tests.md \
     --sha12 756d1c7db68e --print-body                                        # worker
-./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit any body
+./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit a dispatch body
+./scripts/anet_payload.sh guard   --body "$RESULT" --kind result             # audit a delivery text
 ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-tests.md \
     --hub "$COMMHUB_URL" --network <network_id> --allow-untracked            # put the bytes on the hub
 ./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries
@@ -84,10 +87,10 @@ ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-
 |---|---|
 | [SKILL.md](SKILL.md) | The full protocol: connection and tokens, both role flows, state machine, parameter hard rules, the manual-node section, Gotchas |
 | [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: one node one slot, the four transitions, how a task can leave you, token rules, the online-vs-working diagnosis, failure modes |
-| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets, the `## seg-NN` segment format, the sha12, `compose` guards, the two handoff routes (git / hub attachment, with the 12 MiB · 20-file · 60-per-hour · 404-is-not-403 limits), failure modes |
+| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets next to the hub's own ceilings, the one-file-per-task shape (and the `## seg-NN` segment format), the sha12, `compose` guards, the two handoff routes (git / hub attachment, with the 12 MiB · 20-file · 60-per-hour · 404-is-not-403 limits), what renders where in the Dashboard, failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what idle-expires, how to identify a token, revocation, environment contamination, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `sha12:`, one task per file), `verify` it on the worker side, `guard` an existing body, `list` the file's segments, `upload` the file through the hub (prints file_id + sha12 + the pointer line) |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `sha12:`, one task per file), `verify` it on the worker side, `guard` an existing body (`--kind result` enforces the delivery budget and refuses markup the plain-text surfaces cannot render), `list` the file's segments, `upload` the file through the hub (prints file_id + sha12 + the pointer line) |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |
 | [AGENTS.md](AGENTS.md) | Directory-level notes: purpose, triggers, contents, Gotchas |

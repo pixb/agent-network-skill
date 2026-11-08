@@ -254,7 +254,7 @@ The task a manual node receives is normally a 4-line pointer (SKILL.md §1.2):
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 400 chars
+report_completion once, result <= 1200 chars
 ```
 
 So the human side of the job is: `git pull`, then prove the pointer with the sibling script:
@@ -268,8 +268,8 @@ scripts/anet_payload.sh verify --file commhub_tasks/r07/export-tests.md \
 - a mismatch (or a missing segment) is a **conflict**: run `working`, then say so in `reply` — never
   work on the revision you happen to have;
 - work the printed **segment**, not the task text;
-- `reply` carries a ≤400-character result (conclusion, what you ran to verify it, the path of the
-  long report); the long report goes into the segment's 产出 section and gets committed.
+- `reply` carries a ≤1200-character result (line 1 = the conclusion, then what you ran to verify it,
+  then the path of the long report); the long report goes into the payload file and gets committed.
 
 Short bodies matter *more* for a manual node than for a runtime one: the script sends the stored body
 back verbatim, and a short body is the only version a human can also reproduce without drifting — and
@@ -354,8 +354,8 @@ closed task never comes back: the next round is a new task id.
 "Visible" means *visible in the Dashboard*. Three pages read three different tables: Tasks reads
 `tasks` (with a `completions` fallback), Messages reads `inbox` via `?alias=<alias>`, and
 `/messages/inbox` reads `user_inbox` via `?scope=user`. The inbox page is the reading surface that
-was missing: `user_inbox` already held every `dm` a node sent the control room (production
-`net_b91c0d535346`: 42 rows for `admin`, all unacked) and no page read it.
+was missing: `user_inbox` already held every `dm` a node sent the control room (measured on one
+production network, id withheld: 42 rows for the manager account, all unacked) and no page read it.
 
 | channel | tool | lands in | Dashboard |
 |---|---|---|---|

@@ -20,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.7
+  version: 0.6.8
   created: 2026-10-07
-  last_reviewed: 2026-11-08
+  last_reviewed: 2026-11-09
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.7
+  version: 0.6.8
   created: 2026-10-07
 ---
 
@@ -208,10 +208,25 @@ git, bash, and `bash scripts/anet_payload.sh`); commhub calls are the scarce res
 
 ### 1.2 Short parameters; the long text goes to a file (hard rule)
 
-Budgets for text passed **into** a commhub argument: `task` ≤ 300 characters, ≤ 6 lines, line 1
-≤ 80; `context` ≤ 200; `send_message` / `broadcast` `message` ≤ 200; `report_completion` `result`
-≤ 400 (the row stores 4000 — do not use them all). Never a pasted spec, a code block, a log, a diff,
-a table, a file's content, or an absolute path.
+Budgets for text passed **into** a commhub argument. The hub's own ceilings are far larger — `task`
+accepts 10 000 characters (`TASK_CONTENT_MAX`), `report_completion` stores the first 4000 characters
+of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, not limits**:
+
+| argument | budget | why this number |
+|---|---|---|
+| `task` (dispatch body) | ≤ 300 chars, ≤ 6 lines, line 1 ≤ 80 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
+| `report_completion` `result` | ≤ 1200 chars, line 1 ≤ 80 | the delivery is read in the node's task pane, which collapses at ≈12 lines: conclusion and evidence lines first, the long text in a file |
+| `send_message` / `broadcast` / `send_reply` | ≤ 1500 chars, line 1 ≤ 80 | list views show line 1 only |
+| `context` | ≤ 200 | the hub's preview cuts at 200 |
+
+Never a pasted spec, a code block, a log, a diff, a table, a file's content, or an absolute path.
+
+**Formatting is a hard rule, not a taste.** Read `references/payload-files.md` ("What renders
+where") for the measured per-surface table: the node's **task pane renders markdown**, while the **node card, node list
+rows, the Tasks page and the Messages page render plain text**. Use the subset that reads well in
+both — line 1 = a self-sufficient summary, a blank line between blocks, `- ` bullets, `key: value`
+fields (`verdict:` / `tests:` / `report:` / `commit:`). Do not use tables, `#` headings, `**bold**` or
+backticks: in the plain-text surfaces those appear as their own characters.
 
 Long text lives in a **payload file in your working tree** — **one file per task**, named after the
 task: `commhub_tasks/<round>/<task-slug>.md`. The body is a 4-line pointer at that file:
@@ -220,7 +235,7 @@ task: `commhub_tasks/<round>/<task-slug>.md`. The body is a 4-line pointer at th
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 400 chars
+report_completion once, result <= 1200 chars
 ```
 
 **One file per task, and why that is not a style preference**: a worker pulls the branch and reads the
@@ -311,8 +326,10 @@ calls in it. Between them you do local work (read files, run the tests), which c
    `report_completion(alias=<self>, task=<task_id is safest; the raw body must match character-for-character if used>,
    result=<summary: conclusion / changes / how you verified — the task row keeps only the first 4000
    characters>, artifacts=[<URL or file path>])`. You may also pass `score` (self-assessed 0-10).
-   `result` is ≤400 characters: conclusion, how it was verified, and the path of the long report —
-   the long report goes in the file (in the segment's 产出 section), not in the parameter.
+   `result` is ≤1200 characters, line 1 a one-sentence conclusion: what changed, how it was verified,
+   and the path of the long report — the long report goes in the file (in the segment's 产出 section),
+   not in the parameter. Format it for the task pane: `- ` bullets and `key: value` fields, no tables,
+   headings, bold markers or backticks (§1.2, "Formatting is a hard rule").
    Merging several tasks into one report = none of them take effect.
    **`report_completion` is invisible to a person.** It writes `completions` + `tasks.result` only —
    no `inbox` row for the dispatcher, no `user_inbox` row, no unread badge; the Tasks page is the only
@@ -442,8 +459,8 @@ directory, and every identity rule is network-scoped: alias uniqueness
 `clone_node` → `alias_taken`, `createNetworkTokenForNode` → `cross_network_node` / `node_owner_mismatch`.
 Consequences that are easy to get wrong:
 
-- **Node aliases carry machine + project** (`200-pix-auto-video-manual-doubao`). Two projects that
-  share a network and reuse a name collide, and the second registration is refused.
+- **Node aliases carry machine + project** (`<machine>-<project>-<role>`, e.g. `ws01-export-manual-node`).
+  Two projects that share a network and reuse a name collide, and the second registration is refused.
 - **A user token has no implicit network.** Every REST read names one: `?network_id=<id>` on
   `/api/messages`, `/api/tasks`, `/api/status`; the hub answers `"network_id required (utok has no
   implicit network; pass ?network_id=<id>)"` when you forget. The CLI takes `--network`.
@@ -515,7 +532,8 @@ log then says so, and the card resumes reading offline).
 
 **The manager is a user, not a node, and that is the normal shape — not a workaround.**
 Dispatch is done with a user token, so every task row carries `from_name = <username>`
-(production `net_b91c0d535346`: 200 most recent tasks, `from_name` is `admin` in 200 of them).
+(measured on one production network, id withheld: of the 200 most recent tasks, `from_name` was the
+dispatching user's name in 200 of them).
 A manager account needs no node: `report_status` — the heartbeat that makes a node exist —
 **refuses user tokens** (`tools.ts` `network_token_required`), so there is nothing for a human
 account to run, and a human account has no `sessions` row to be dispatched to.
@@ -525,7 +543,7 @@ One manager can drive any number of projects. The unit that separates projects i
 (`resolveNodeIdForAlias(nodes WHERE alias AND network_id)`, `canonicalAliasExists(networkId, alias)`,
 `clone_node` → `alias_taken`, `createNetworkTokenForNode` → `cross_network_node` / `node_owner_mismatch`).
 So the convention is **one network per project**, and a node alias carries machine + project
-(`200-pix-auto-video-manual-doubao`). The manager's own channels are per network: a user token has
+(`ws01-export-manual-node`). The manager's own channels are per network: a user token has
 no implicit network, so every read names one (`GET /api/messages?alias=admin&network_id=…`, and
 the hub answers `"network_id required (utok has no implicit network; pass ?network_id=<id>)"`).
 
@@ -686,22 +704,25 @@ The dispatched body is normally a 4-line pointer (`file:` / `seg:` / `sha12:`, �
 fetches that body from the hub (never retype it), and the human works the **file**: run
 `bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
 file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
-on the revision you happen to have. `reply` carries a ≤400-character `result` — conclusion, what you
-ran to verify it, and the path of the long report, which goes into the segment and gets committed.
+on the revision you happen to have. `reply` carries a ≤1200-character `result` (line 1 is the
+conclusion) — what you ran to verify it, and the path of the long report, which goes into the payload
+file and gets committed.
 
-**The `sha12` in the pointer is the SEGMENT hash, not the file hash.** `verify` prints it as
-`sha12 : <value>  expected <value>` for the `## <seg>` block only; hashing the whole payload file
-produces a different value and looks like a mismatch. A worker that reports “task says `X`, the
-committed file is really `Y`” has almost always hashed the whole file — re-run `verify` with the
-segment name, quote its output line in `reply`, and treat a whole-file hash as a node-side
-calibration error, not as a planner-side conflict (2026-11-08, 0007 seg-02: task `dc58d929edb8`,
-worker reported the whole-file `fb9bc1fdbc62`; `verify --seg seg-02` exited 0 on `dc58d929edb8`).
+**`sha12` is the hash of whatever the pointer names.** With no `seg:` it is the **whole payload file**
+(v0.6.7 default: one task per file); with `seg:` it is **that segment's** block, not the file's.
+`verify` prints `sha12 : <value>  expected <value>` for the unit it was given, so run it the way the
+pointer is written — `--file <path> --sha12 <value>`, plus `--seg <id>` only when the pointer names a
+segment. A worker that reports “task says `X`, the committed file is really `Y`” has almost always
+hashed the whole file while the pointer named a segment — re-run `verify` with the segment name, quote
+its output line in `reply`, and treat a whole-file hash as a node-side calibration error, not as a
+planner-side conflict (2026-11-08, 0007 seg-02: task `dc58d929edb8`, worker reported the whole-file
+`fb9bc1fdbc62`; `verify --seg seg-02` exited 0 on `dc58d929edb8`).
 
 ### 7.5 Two aliases, parallel dispatch, and timeout resend (operator order 2026-11-08)
 
 **An alias is not a node.** Read the `alias → node_id` mapping from `GET /api/status` (or from
 `send_task`'s `actual_to.to_node_id`) before you treat two aliases as two workers. Manual nodes often
-appear as two aliases (`...-manual-doubao` / `...-manual-doubao2`); they may be two channels of one
+appear as two aliases (`…-node-a` / `…-node-b`); they may be two channels of one
 machine or two separate nodes. Parallel dispatch is real **only when the `node_id`s differ** — on one
 node the second task overwrites the first in the session row (§Gotchas, "a node has ONE task slot").
 
@@ -767,28 +788,28 @@ target repo, is a **timed-out task, not a delivery**. Resend it as a **new task*
   `verify` refuses to work from it; the worker reports the conflict in `result` (never works on a
   guess). Push the branch, or ship it as a hub attachment with its `file_id` (§4).
 
-### 7.6 派工验收行必含「生成前词面自检」条款（v0.6.6，2026-11-08 两笔到货因旧词面被打回）
+### 7.6 A delivery must name the revision fingerprints it used
 
-事故：同一晚两笔到货（029 `d80b58d5daa1` commit `cef15af`、077 `675354b73a08` commit `29552f5`）
-数值与形态俱佳，但日志 `prompt_sha256` 分别等于**第 6 轮旧词面**与**当日 01:14 旧版词面**——
-节点在自己的 working directory 里沿用了本机旧提示词，派工词面与 seed 段双双未落实 ⇒ 按三证硬项打回（无豁免）。
+A worker's machine has its own history: the branch it pulled, the file it read, the prompt, config or
+seed it ran with. A delivery that only says "done" proves nothing about **which revision** produced
+the result — and a node that quietly keeps using a stale local copy delivers work that never matched
+the dispatch. The measured shape of that failure (one project round, 2026-11-08): two deliveries that
+looked excellent in shape and numbers, both produced by an **older local revision** of the input text;
+only a fingerprint comparison in the log showed it, and both were rejected.
 
-**派工侧硬条款**（写进 payload 段的验收清单第 0 项，不是写进任务正文）：
+The rule, both sides:
 
-```
-0. 生成前词面自检：git pull --ff-only 后
-   sha256sum assets/prompts/<本段>.txt | cut -c1-12
-   逐字＝本段指定的 raw sha12 才可出图；不一致立刻回报
-   「词面不符：本机 xxxxxxxx ≠ 指定 yyyyyyyyyy」并停止出图。
-   回报里必须带上你实际使用的 raw sha12。
-```
+- **Dispatch** names the fingerprint of every input the worker must use — `<input-name>=<sha12>` per
+  input, plus the branch — in the payload file's acceptance list, not in the task body (the body stays
+  the short pointer, §1.2).
+- **Delivery reports the fingerprints it actually used**, in the same notation, plus the commit:
+  `raw=<sha12>  file=<path>  sha12=<pointer sha12>  commit=<hash>`. A delivery missing them is
+  incomplete, not "fast".
+- **Stop on mismatch**: after `git pull`, recompute before doing the work. If the local value differs
+  from the dispatched one, do not work — report `fingerprint mismatch: local <x> != dispatched <y>` in
+  `result` and let the dispatcher decide (§2 step 3: a conflict is reported, never worked around).
+- Re-running identical inputs and getting a different output (a model, a renderer, a random seed) is
+  **not** reproducibility evidence. Say which parts are non-deterministic.
 
-**为什么放在 payload 而不是任务正文**：正文四行是固定结构（摘要＋指针＋branch＋report 要求），
-条款属验收清单；正文只补一句提示（`派工 context` 里点名 raw sha12 自检），保持单调用与短正文。
-
-**验收侧配套**（image-qa-loop-skill §2.18.42）：`log_prompt_sha256_equals_dispatch_strip: False` 时
-用 git 历史 strip 比对做溯源，定位节点实际使用的词面版本并写进台账 `prompt_sha12`（注明「非派工版」）；
-同 seed 同词面重跑出不同图属引擎非确定性，**不得**当作可复现证据。
-
-**回报字段**（manual node 的 `report_completion` 结果里应包含）：
-`seed=<逐字> raw_sha12=<逐字> sha12=<图> commit=<hash>`，四值齐才可进入验收；缺 raw_sha12 视为回报不合格。
+Project vocabularies of this rule — an image round's prompt file, a seed, a ledger column, a named
+sibling skill — belong in that project's own documents, not in this protocol.

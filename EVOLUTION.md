@@ -107,3 +107,33 @@ Appended automatically by scripts/run_evals.py (and scripts/evolve.py) when a ch
 ]
 ```
 
+## 2026-11-08T17:47:42Z — run_evals --rollout FAILED
+
+- counts: passed=104, failed=0, errors=0, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+
+## 2026-11-08T17:49:24Z — run_evals --rollout FAILED
+
+- counts: passed=8, failed=0, errors=0, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+

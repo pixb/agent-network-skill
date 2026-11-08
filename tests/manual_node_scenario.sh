@@ -253,7 +253,12 @@ print(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12])' "$PROJ/$TASK_FILE")
 
   # The point of the rule: nothing in this file belongs to another task.
   check "task_file_carries_no_other_task" "$([ "$(grep -c 'seg-' "$PROJ/$TASK_FILE")" = 0 ] && echo true || echo false)"
-  record_verdict "pointer names the task's own file ($(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])') chars, sha12 $SHA12)"
+  # The budget the body must respect. Asserted as a fact, so the golden baseline carries the sha12
+  # (content-sensitive) and not a character count that a budget change moves by one.
+  POINTER_CHARS="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])')"
+  FIRST_CHARS="$(printf '%s' "$BODY" | head -1 | python3 -c 'import sys;print(len(sys.stdin.read().rstrip(chr(10))))')"
+  check "pointer_within_dispatch_budget" "$([ "$POINTER_CHARS" -le 300 ] && [ "$FIRST_CHARS" -le 80 ] && echo true || echo false)"
+  record_verdict "pointer names the task's own file (sha12 $SHA12, ${POINTER_CHARS} chars within the 300-character budget)"
 fi
 TASK_ID="$(dispatch "$BODY")"
 record "dispatched"

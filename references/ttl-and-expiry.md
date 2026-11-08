@@ -1,45 +1,47 @@
-# 任务有效期：派活时要不要写 `ttl_seconds`
+# Task validity: write `ttl_seconds` when you dispatch
 
-## 实测到的形状
+## What the data looks like (measured)
 
-生产网络 `net_b91c0d535346`（2026-11-04 读取，只读不改）：最近 200 条任务里 16 条
-`expired`，它们的 TTL 是 **最小 600s / 中位 3600s / 最大 14400s**；其中一批 5 条
-2026-11-04 04:01:44 派出、TTL 7200s，在 06:01:44 整点集体过期，06:06:03 巡检发出
-「5 个任务已过期」的通知。
+One production network, id withheld (read 2026-11-04, read-only): of the 200 most recent tasks, 16
+were `expired`, with TTL **min 600 s / median 3600 s / max 14400 s**. One batch of 5 tasks dispatched
+at 04:01:44 with TTL 7200 s expired together at exactly 06:01:44, and the round sweep emitted the
+"5 tasks expired" notification at 06:06:03.
 
-**默认值就是 3600s（一小时）**：`server/src/tools.ts` 的 `send_task` 写
-`ttl_seconds: z.number().min(1).max(86400).optional()`，插入时
-`expires_at = datetime('now', '+${ttl_seconds || 3600} seconds')`。派活时不写这个参数，
-就等于承诺「一小时内会被 ack 并跑完」。手动节点等人回答、等素材、等人上线，一小时的
-默认值几乎必然过期。
+**The default is 3600 s (one hour).** `send_task` in `server/src/tools.ts` declares
+`ttl_seconds: z.number().min(1).max(86400).optional()` and inserts
+`expires_at = datetime('now', '+${ttl_seconds || 3600} seconds')`. Omitting the parameter is a promise
+that the task will be acked and finished within an hour — which a manual node that waits for a human
+answer, for material, or for a human to come online almost always misses.
 
-## 三条约定
+## Three conventions
 
-1. **派活时显式写 TTL**，按工作时长给，不要靠默认值：短任务 `ttl_seconds=3600`；
-   当天要完成的 `ttl_seconds=28800`；跨天/需要人回话的 `ttl_seconds=86400`（这是
-   `send_task` 的上限，超过会被 Zod 拒）。
-2. **过期后的下一轮是新任务，不是重试。** `retry_task` 把 `expires_at` 重置成
-   `+1 hour`（`tools.ts` 的 retry 分支），不沿用原 TTL —— 所以「retry 一个要跑一天的
-   任务」得到的是新的一小时有效期。长跑的活重新派，显式写 TTL。
-3. **过期通知进的是收件箱，不是消息流。** Hub 代发的 `task_expired` /
-   `task_orphan_suspected` 落 `user_inbox`，在 Dashboard 的 `/messages/inbox` 里看得见
-   （上面那批 5 条过期通知就是这么看到的）。Messages 页看不到它们。
+1. **Write the TTL explicitly**, sized to the work, never inherited from the default: short work
+   `ttl_seconds=3600`; same-day work `ttl_seconds=28800`; work that spans days or waits for a human
+   `ttl_seconds=86400` (that is the `send_task` ceiling; larger values are refused by Zod).
+2. **After an expiry, the next round is a new task, not a retry.** `retry_task` resets `expires_at` to
+   `+1 hour` (the retry branch in `tools.ts`) and does not reuse the original TTL — so "retry the
+   task that runs for a day" buys you a fresh hour. Re-dispatch long work, with the TTL written out.
+3. **Expiry notifications go to the inbox, not to the message stream.** The hub-sent `task_expired` /
+   `task_orphan_suspected` land in `user_inbox`, which the Dashboard shows at `/messages/inbox` (that
+   is how the 5 notifications above were seen). The Messages page does not show them.
 
-## 巡检的长时间无动静规则（默认关闭）
+## The long-silence sweep (disabled by default)
 
-`COMMHUB_STALE_OPEN_TASK_HOURS=<N>`（写进 hub 机器的 `~/.commhub/hub.env`）：
-`acked` / `running` 状态、超过 N 小时毫无动静的任务，由每 5 分钟的巡检收口成
-`expired`（每轮最多 500 条，**不通知派活方**）。默认 `0` = 关闭，**生产当前未设置**。
-文档建议值 72（`docs-site/docs/deploy/production.md`、`concepts/task-lifecycle.md`）。
+`COMMHUB_STALE_OPEN_TASK_HOURS=<N>` (in the hub machine's `~/.commhub/hub.env`): tasks sitting in
+`acked` / `running` with no movement for more than N hours are closed out by the 5-minute sweep into
+`expired` (max 500 per round, **the dispatcher is not notified**). Default `0` = off, **not set in
+production**. Documented suggestion: 72 (`docs-site/docs/deploy/production.md`,
+`concepts/task-lifecycle.md`).
 
-要点：这条规则**不能替代第 1 条**。它管的是「已开工后静默」的任务，TTL 过期发生在
-它之前；把它打开不会让一小时过期的问题消失。它是 hub 侧配置变更，按仓库规则要先评审
-再改生产，不在本 skill 的约定里顺手执行。
+Point: this rule **does not replace convention 1**. It governs tasks that already started and then went
+silent; TTL expiry happens before it, so turning it on does not make the one-hour expiry problem
+disappear. It is a hub-side configuration change: by the repository's rules it is reviewed before it
+touches production, and this skill does not apply it on the side.
 
-## 一条能自查的判据
+## A check you can run yourself
 
 ```bash
-# 某网络里过期任务的 TTL 分布（读 hub，不改任何状态）
+# TTL distribution of the expired tasks in one network (reads the hub, changes nothing)
 curl -s -H "Authorization: Bearer $UTOK" \
   "$HUB/api/tasks?network_id=$NET&limit=200" | python3 -c '
 import json,sys
@@ -50,36 +52,40 @@ ttl=[(parse(t["expires_at"])-parse(t["created_at"])).total_seconds() for t in ro
 print("expired:",len(rows),"ttl min/median/max:",min(ttl) if ttl else "-","sorted(ttl)[len(ttl)//2] if ttl else -",max(ttl) if ttl else "-")'
 ```
 
-`ttl median` 落在 3600 上，就是「大家都在用默认值」的信号；把它变成显式决定即可。
+A median of 3600 is the signal that everyone is on the default. Turn that into an explicit decision.
 
-## 任务的 TTL 必须盖过节点跑完一条任务的时间（2026-11-06）
+## The TTL must cover the node's own finish time (2026-11-06)
 
-指挥室常见的假象：任务在 hub 侧 `expired`，节点**还在跑**。低端设备 + 本地大模型
-的节点尤其容易撞上 —— 一次上下文压缩就是分钟级（实测 GTX 1070 8GB、131K 上下文：
-一次压缩 7–9 分钟），而 hub 的默认 TTL 是 3600s。
+The common illusion in a control room: the task is `expired` on the hub side and the node **is still
+working**. Nodes on weak hardware running local models hit this most: one context compaction is
+minutes (measured on a GTX 1070 8 GB with a 131K context: 7–9 minutes per compaction) while the hub's
+default TTL is 3600 s.
 
-判据（派活时算一下）：
+The arithmetic to do at dispatch time:
 
 ```
-ttl_seconds ≥ 2 × (节点 idle 预算秒数)
-节点 idle 预算 = PI_TIMEOUT_MS / 1000（默认 1800s ⇒ TTL 至少 3600s）
+ttl_seconds ≥ 2 × (the node's idle budget in seconds)
+idle budget = the node runtime's timeout knob / 1000   (e.g. 1800 s ⇒ TTL at least 3600 s)
 ```
 
-节点侧的旋钮在启动横幅里会点名来源（env > flags > 默认）：
+A node runtime names the source of every timeout in its start banner (env > flags > default). Example
+banner, the pi runtime:
 
 ```
 [pi] promptAck=900000ms(env) handshake=45000ms(default) lateAck=30000ms lateGrace=90000ms
 [pi] idle=1800000ms(flags.piTimeoutMs) busyPolicy=queue rollover=262144B carry=1200chars
 ```
 
-看到 `source=floor` 说明你写的值比一次压缩还短，被夹住了。
+A `source=floor` means the value you asked for was shorter than one compaction and was clamped.
 
-**节点报的失败码是可以照抄进验收判据的**（都不会被无谓重放）：
-`pi_prompt_ack_timeout`（等 pi 接受超时，消息里点名旋钮）、`pi_prompt_rejected`、
-`pi_handshake_timeout`、`pi_runtime_busy`（busyPolicy=skip 下本轮未提交）。
+**The failure codes a node reports can be copied into an acceptance criterion verbatim** (none of them
+is replayable, so a replay would be wasted work): `pi_prompt_ack_timeout` (waiting for the runtime to
+accept the prompt timed out; the message names the knob), `pi_prompt_rejected`,
+`pi_handshake_timeout`, `pi_runtime_busy` (this round was not submitted under `busyPolicy=skip`).
 
-**「pi 忙 / 正在压缩」不是失败**：节点会把排队状态经 `report_status("working", …)` 报出来，
-任务保持 running。看到这种状态先等，不要 `retry_task` —— 重发会让 pi 把同一任务跑两遍。
+**"The runtime is busy / compacting" is not a failure.** The node reports the queued state through
+`report_status("working", …)` and the task stays `running`. Wait on that state; do not `retry_task` —
+a re-send makes the runtime run the same task twice.
 
-完整运维页：`docs-site/docs/guide/pi-slow-local-model.md`；
-实测与断言：`docs/tests/report-pi-rpc-ack-20261106.txt`。
+Operations page for one slow local runtime: `docs-site/docs/guide/pi-slow-local-model.md`;
+measurements and assertions: the hub project's `docs/tests/report-pi-rpc-ack-20261106.txt`.

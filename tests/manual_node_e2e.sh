@@ -353,7 +353,7 @@ hub, utok, net, file_id, sha12 = sys.argv[1:6]
 body = ("seg-01 附件规格：按附件正文执行\n"
         f"attachment: {file_id}  sha12: {sha12}\n"
         "work it in your own working directory; accept: the attachment's acceptance list\n"
-        "report_completion once, result <= 400 chars")
+        "report_completion once, result <= 1200 chars")
 req = urllib.request.Request(
     hub + "/api/task", method="POST",
     headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},

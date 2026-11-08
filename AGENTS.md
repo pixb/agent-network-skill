@@ -56,6 +56,15 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   with `scripts/anet_payload.sh compose`, verify it on the worker side with `verify`, audit an
   existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
   the shell — a C locale must not silently triple a CJK body.
+- **The budgets are discipline, not limits.** The hub accepts 10 000 characters for `task`, stores the
+  first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 300 / 1200 / 1500, with
+  line 1 ≤80. A longer dispatch body buys no display (a node card shows a blind 200-character slice)
+  and makes the byte-exact echo in `report_status(working)` more likely to drift.
+- **Write for the surface that renders plain text.** The node's task pane renders markdown; the node
+  card, node list rows, the Tasks detail and the Messages page do not. Use line 1 as a self-sufficient
+  summary, blank lines between blocks, `- ` bullets, `key: value` fields; never tables, `#` headings,
+  `**bold**` or backticks — there they appear as their own characters. `guard --kind result` refuses
+  markup and enforces the 1200-character delivery budget.
 - **A big file goes through the hub, not across disks.** `bash scripts/anet_payload.sh upload
   --file <relpath> --hub <url> --network <id>` → `file_id` + sha12 + the pointer line, and the same
   command's `meta.attachments` entry to dispatch with. Measured limits that bite: 12 MiB per file
