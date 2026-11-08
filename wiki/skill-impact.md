@@ -55,3 +55,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `tests/manual_node_e2e.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/portable-protocol-content.md`
+
+## 2026-11-08T02:50:49Z — accepted
+
+- Proposal: `drop-locale-criterion`
+- Target: `evals/agent-network-skill.eval.md`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/portable-protocol-content.md`
