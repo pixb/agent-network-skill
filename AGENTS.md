@@ -60,6 +60,8 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 300 / 1200 / 1500, with
   line 1 ≤80. A longer dispatch body buys no display (a node card shows a blind 200-character slice)
   and makes the byte-exact echo in `report_status(working)` more likely to drift.
+  A **resend body** (it quotes an expired `task_id`) is budgeted at 340 — quoting a hub task id costs
+  36 characters — and must carry an `accept:` line, because that body is what acceptance quotes.
 - **Write for the surface that renders plain text.** The node's task pane renders markdown; the node
   card, node list rows, the Tasks detail and the Messages page do not. Use line 1 as a self-sufficient
   summary, blank lines between blocks, `- ` bullets, `key: value` fields; never tables, `#` headings,

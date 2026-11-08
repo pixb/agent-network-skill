@@ -10,3 +10,4 @@ Evidence-linked draft patterns for skill maintenance. Do not load this file at r
 - [one-task-one-payload-file](patterns/one-task-one-payload-file.md) — draft
 - [hub-budget-versus-protocol-budget](patterns/hub-budget-versus-protocol-budget.md) — draft
 - [dashboard-plain-text-surfaces](patterns/dashboard-plain-text-surfaces.md) — draft
+- [resend-body-carries-the-requirement-line](patterns/resend-body-carries-the-requirement-line.md) — draft

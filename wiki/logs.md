@@ -29,3 +29,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-08T17:54:46Z — pattern added
 
 - `dashboard-plain-text-surfaces`
+
+## 2026-11-08T18:16:02Z — pattern added
+
+- `resend-body-carries-the-requirement-line`

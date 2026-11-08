@@ -248,6 +248,21 @@ run reply "$TASK4" "seg-01 done: 3 unit tests green" >/dev/null
 [ "$(task_status "$TASK4")" = "replied" ] || { echo "expected replied"; exit 1; }
 echo "   short body round-tripped byte-exactly: acked -> running -> replied"
 
+echo "== a timeout resend must carry a requirement line (§7.5)"
+SHA4="$(printf '%s' "$POINTER4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["sha12"])')"
+RESEND_BODY="resend seg-01: task $TASK4 closed, work it again
+file: $PAYLOAD  seg: seg-01  sha12: $SHA4
+branch $BRANCH (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
+report_completion once, result <= 1200 chars"
+RESEND_CHARS="$(printf '%s' "$RESEND_BODY" | python3 -c 'import sys;print(len(sys.stdin.read()))')"
+"$SKILL_DIR/scripts/anet_payload.sh" guard --body "$RESEND_BODY" --kind resend >/dev/null \
+  || { echo "guard refused a resend body that quotes the task id and carries accept: ($RESEND_CHARS chars)"; exit 1; }
+echo "   resend body (quotes task $TASK4, $RESEND_CHARS chars ≤ 340): accepted"
+if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$(printf '%s' "$RESEND_BODY" | sed 's/; accept: every item on the segment acceptance list//')" --kind resend >/dev/null 2>&1; then
+  echo "guard accepted a resend body with no requirement line"; exit 1
+fi
+echo "   the same body with the requirement line removed: refused"
+
 echo "== one file per task: the pointer names a FILE, so its sha12 is the FILE's hash"
 FILE_TASK="commhub_tasks/e2e/export-tests.md"
 cat > "$PROJ/$FILE_TASK" <<'EOF'

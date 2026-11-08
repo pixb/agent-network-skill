@@ -75,6 +75,7 @@ these are discipline, not limits:
     --sha12 756d1c7db68e --print-body                                        # worker
 ./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit a dispatch body
 ./scripts/anet_payload.sh guard   --body "$RESULT" --kind result             # audit a delivery text
+./scripts/anet_payload.sh guard   --body "$RESEND" --kind resend             # a resend body: ≤340, accept: required
 ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-tests.md \
     --hub "$COMMHUB_URL" --network <network_id> --allow-untracked            # put the bytes on the hub
 ./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries

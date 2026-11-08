@@ -20,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.8
+  version: 0.6.9
   created: 2026-10-07
   last_reviewed: 2026-11-09
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.8
+  version: 0.6.9
   created: 2026-10-07
 ---
 
@@ -217,6 +217,7 @@ of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, 
 | `task` (dispatch body) | ≤ 300 chars, ≤ 6 lines, line 1 ≤ 80 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
 | `report_completion` `result` | ≤ 1200 chars, line 1 ≤ 80 | the delivery is read in the node's task pane, which collapses at ≈12 lines: conclusion and evidence lines first, the long text in a file |
 | `send_message` / `broadcast` / `send_reply` | ≤ 1500 chars, line 1 ≤ 80 | list views show line 1 only |
+| resend body (quotes an existing `task_id`) | ≤ 340 chars, line 1 ≤ 80, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes (§7.5) |
 | `context` | ≤ 200 | the hub's preview cuts at 200 |
 
 Never a pasted spec, a code block, a log, a diff, a table, a file's content, or an absolute path.
@@ -732,10 +733,19 @@ ledger cannot record both. Pick two different segments, dispatch one to each, an
 
 **Timeout = `expired` with an empty `result` and no arrival.** Read the task row, not the session row:
 a row with `status: expired`, a non-empty `completed_at` and an empty `result`, plus no commit in the
-target repo, is a **timed-out task, not a delivery**. Resend it as a **new task** with the same
-4-line pointer (`file:` / `seg:` / `sha12:` unchanged, fresh ttl), and record in the ledger
+target repo, is a **timed-out task, not a delivery**. Resend it as a **new task** with the same pointer
+(`file:` / `seg:` / `sha12:` unchanged, fresh ttl), and record in the ledger
 `expired_task_ids: [<old id>]` next to the new dispatch id. Never accept, grade, or count an
-`expired` row as an arrival, and keep the original payload segment as the single source of the spec.
+`expired` row as an arrival, and keep the original payload file as the single source of the spec.
+
+**A resend body must carry the requirement line, and it names the old task id.** Quoting the expired
+`task_id` is what keeps the ledger straight (`expired_task_ids`), and quoting it costs 36 characters —
+so a resend body is audited at **≤340**, and `accept:` is mandatory in it. Measured 2026-11-09: a
+timeout resend was dispatched as `resend <seg>: task <uuid> expired, work it again` with no acceptance
+line, and acceptance had to be argued in prose afterwards. `bash scripts/anet_payload.sh guard
+--kind resend` refuses exactly that body and accepts the same body with the `accept:` line added; if
+the task you are resending never had a requirement line, **add one to the payload file first**, then
+resend — do not resend text that cannot be accepted.
 
 ## Gotchas
 

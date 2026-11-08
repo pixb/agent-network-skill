@@ -76,3 +76,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/anet_payload.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/hub-budget-versus-protocol-budget.md`
+
+## 2026-11-08T18:16:02Z — accepted
+
+- Proposal: `resend-body-v069`
+- Target: `scripts/anet_payload.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/resend-body-carries-the-requirement-line.md`

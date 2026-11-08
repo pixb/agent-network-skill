@@ -30,6 +30,7 @@ the repo, and the same pointer keeps working after `retry_task`.
 | `send_task(context=…)` | ≤ 200 characters, one line (project + branch + "in your working directory") | — |
 | `send_message` / `broadcast` / `send_reply` | ≤ 1500 characters, line 1 ≤ 80 | 10 000 (`send_reply` text) |
 | `report_completion(result=…)` | ≤ 1200 characters, line 1 ≤ 80 | stores the first 4000 |
+| resend body (quotes an existing `task_id`) | ≤ 340 characters, line 1 ≤ 80, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes |
 
 The budgets are **discipline, not limits**: the dispatch body has to be echoed byte-for-byte by the
 worker, and a node card shows only a blind 200-character slice, so a longer body buys no display and
