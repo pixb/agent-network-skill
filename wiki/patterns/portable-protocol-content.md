@@ -28,3 +28,18 @@ prerequisite, not a path baked into the skill.
 
 - `raw/2026-11-08T024525Z-95b0b4febf6b.log` — pipeline run from the foreign worktree, no hub-source env
 - `raw/2026-11-08T024525Z-2afae00d5256.log` — manual-node E2E from the same foreign worktree, ending `ALL E2E ASSERTIONS PASSED`
+
+## The criterion that failed, and why it belongs in the script
+
+`guard-counts-characters-not-bytes` was added as a command criterion to lock v0.6.1's
+"count characters, not bytes" fix. It ran green under `scripts/run_pipeline.py` (84 checks, 0
+failed) and red under the verification runner's rollout (11 checks, 11 failed), so the gate
+contradicted itself. Cause: the criterion compared a **python decode default** — the CJK body was
+re-decoded by a `python3 -c` pipe whose text encoding depends on the ambient locale, and the
+verification runner runs with a stripped environment. It measured the host, not the script.
+
+It was removed (v0.6.3). The honest way to gate this rule is for `guard` to report the facts
+itself — `--json` carrying the byte length next to the character length — so the criterion is an
+arithmetic comparison inside one program, with no locale-dependent pipe in it. That is the next
+change; a gate that measures the runner's environment is worse than no gate, because it fails
+loudly for a reason the protocol does not control.
