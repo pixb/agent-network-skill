@@ -167,3 +167,30 @@ from the heartbeat, so this is exactly the code that silently changes what the c
 - `validate.py` reports no line-count warning.
 - `git status` clean after a `wiki_maintenance.py capture` + `record-impact` run.
 - `python3 scripts/run_evals.py` green, `security_scan.py` CLEAN, `skill_graph.py run` OK.
+
+## seg-06 Say which tools a given token can even see (found during seg-01 acceptance)
+
+**Problem found while accepting seg-01.** `SKILL.md` names `report_status` 22 times as an MCP tool, and
+line 133 states "`report_status` / `report_completion` have **no** REST equivalent and are MCP-only".
+Measured 2026-11-08 on hub `0.9.0-preview.265`: a **user-token** MCP client's `tools/list` returns 64
+tools that include `report_completion`, `send_reply`, `send_desktop_message`, `get_task`, `retry_task`
+but **not** `report_status`, not `org_whoami`, and not `schedule_*` — i.e. every tool §0.1 lists as
+node-only. That is consistent with node-only tools being hidden from a user-token client, not with the
+tools being removed; from the planner's seat the two are indistinguishable, and a reader concludes the
+skill names a tool that does not exist.
+
+**Do.**
+
+1. Add a short, measured note where tool names are introduced (§0.1 / §2 header): the tool set a
+   client sees is **scope-filtered by the token identity** — node-only tools are absent from a
+   user-token client's `tools/list`; label the measurement with the hub version, following the skill's
+   existing "measured on" habit.
+2. State the consequence for each side: a dispatcher must not conclude a node-only tool is missing
+   from the hub; a worker must call node-only tools with its own node token, and a "tool not found"
+   from a user-token client is an identity problem, not a hub bug.
+3. Keep it to a note plus one Gotchas bullet. No new tables, no runtime-specific wording.
+
+**Acceptance.**
+
+- The note names the mechanism (identity scope), the measured hub version, and the two consequences.
+- `validate.py` VALID, `python3 scripts/run_evals.py` green, no golden case touched.
