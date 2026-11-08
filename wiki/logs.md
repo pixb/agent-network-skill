@@ -13,3 +13,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-07T20:18:32Z — pattern added
 
 - `portable-protocol-content`
+
+## 2026-11-08T02:14:14Z — pattern added
+
+- `hub-attachment-route-for-manual-nodes`

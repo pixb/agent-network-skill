@@ -140,14 +140,50 @@ The payload file travels the same two routes as any delivery (SKILL.md §4):
 | route | how | body says |
 |---|---|---|
 | git (normal) | commit the file, **push the branch**, the worker pulls | `file: <relpath>  seg: seg-NN  sha12: <sha12>` + the branch name |
-| hub attachment | `POST /api/upload` → `file_id`; put it in `meta.attachments: [{type:"file", file_id}]` | `attachment: <file_id>  sha12: <sha12>` |
+| hub attachment | `POST /api/upload` (multipart field `file`, Bearer) → `file_id`; name it in `send_task(meta.attachments=[{type:"file", file_id, name, mime, size}])`, or top-level `attachments` on REST `/api/task` | `attachment: <file_id>  sha12: <sha12>` |
 
 A file that exists only on the dispatcher's disk is worse than no file at all — and naming its
 absolute path is forbidden in any case.
 
+### The hub-attachment route, exactly
+
+Measured limits (`server/src/uploads.ts`, `server/src/server.ts`), because every one of them is a
+failure you will hit in a long run:
+
+| limit | value | what you see |
+|---|---|---|
+| one file | **12 MiB** | `file_too_large` (checked twice: Content-Length, then the parsed file) |
+| per task | **20 attachments** | `too many attachments (max 20)` |
+| per token | **60 uploads/hour** | 429 `rate_limited` — do not re-upload one file per task in a busy round |
+| entry shape | `type: "file"` + server-generated `file_id` | `bad_attachments` at dispatch, never a silent drop |
+| `path` in an entry | stripped by the hub when `file_id` is present | the worker never sees your disk path (by design) |
+| who may download | network-scoped: the node's `ntok_` must be bound to the upload's network | **404, never 403** |
+
+```bash
+# dispatcher. The hub address and your own access string come from the environment (§0.2);
+# never paste a value into a command line, a log, or a task body.
+FILE_ID=$(curl -s -X POST -F "file=@commhub_tasks/r07/spec.md;type=text/markdown" \
+              -H "Authorization: Bearer $COMMHUB_ACCESS" "$COMMHUB_URL/api/upload" \
+          | python3 -c 'import json,sys;print(json.load(sys.stdin)["file_id"])')
+bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 \
+    --summary "第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" --allow-untracked
+# then send_task(alias=…, task=<the pointer, with `attachment: <file_id>` added>,
+#                meta={attachments: [{type: "file", file_id: "<file_id>"}]})
+
+# worker (runtime node): fetch-attachment.ts pulls it automatically and hands the
+# model a local path (text/markdown, txt, json, csv, pdf, docx and images are on
+# the allow-list; the prompt block states the content is untrusted input).
+# worker (manual node): the same step by hand, with the node's own token —
+./anet_manual_node.sh files <task_id>
+./anet_manual_node.sh fetch <file_id> --out spec.md --sha12 <12 hex>
+```
+
+`--allow-untracked` is the flag for the attachment route: the file is not in git, the hub carries it,
+and `compose` says so in the same breath ("…or deliver it as a hub attachment").
+
 ## Worker side, in order
 
-1. `git pull` (or download the attachment).
+1. `git pull` (or `anet_manual_node.sh fetch <file_id> --out … --sha12 …` for an attachment).
 2. Run `bash scripts/anet_payload.sh verify --file … --seg … --sha12 … --print-body`.
 3. If it refuses: take the task anyway (`ack` → `working`) and state the conflict in
    `report_completion(result=…)`; do not work on a guess and do not widen the change.
@@ -164,5 +200,7 @@ absolute path is forbidden in any case.
 | Task stuck in `acked` after `working` | the echoed body drifted from the stored one (long bodies drift) | cancel + retry with a short pointer body |
 | Worker reports "file not found" | file untracked / unpushed at dispatch time | commit + push, or ship as an attachment |
 | Worker reports sha12 mismatch | the file changed after dispatch | re-dispatch the current segment (cancel + retry) |
+| `fetch` prints "no such file for this node" | the id is unknown, gone, or uploaded in another network (the hub answers 404, never 403) | `files <task_id>` for the ids the task carries; upload in the node's network |
+| 429 `rate_limited` on an upload | 60/hour per caller | one file per round, not one per task; put the segments in one file |
 | Two tasks point at the same segment | one segment must be one task | split the segment, re-dispatch |
 | `duplicate_send` | the same body re-sent within 5 minutes | don't re-send; `get_task` first (one call, one round) |

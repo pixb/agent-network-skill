@@ -34,3 +34,10 @@ same rules is now recorded separately: 12 golden scenarios against throwaway hub
 
 Lesson for this ledger: a `--validation-score` is a claim, the `raw/` capture is the evidence, and an
 entry must not cite evidence that does not contain the run it describes.
+
+## 2026-11-08T02:14:14Z — accepted
+
+- Proposal: `manual-node-attachment-route-v062`
+- Target: `scripts/anet_manual_node.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/hub-attachment-route-for-manual-nodes.md`

@@ -32,9 +32,9 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
 |---|---|
 | [SKILL.md](SKILL.md) | The protocol: tokens, both role flows, the state machine, the manual-node section, Gotchas |
 | [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: the four transitions, token rules, diagnosis, failure modes |
-| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: budgets, `## seg-NN` segment format, the sha12, `compose` guards, handoff routes, failure modes |
+| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: budgets, `## seg-NN` segment format, the sha12, `compose` guards, handoff routes (git / hub attachment, with its measured limits), failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what expires, how to identify a token, revocation, the 401 |
-| [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | Run this on the manual node's machine: register, heartbeat, inbox, ack, working, reply, check |
+| [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | Run this on the manual node's machine: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
 | [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and prove it: `compose`, `verify`, `guard`, `list` |
 | [scripts/run_evals.py](scripts/run_evals.py) | The eval runner: `python3 scripts/run_evals.py` gates the skill's behaviour |
 | [evals/](evals/) | The eval spec and its golden cases (real hubs, real tasks) |
@@ -49,11 +49,16 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   round even when it reads the hub before and after it (`anet_manual_node.sh working` fetches the
   stored body so the echo is byte-exact, then proves the task reached `running`) — the rule counts
   transitions, not shell characters.
-- **The `task` / `message` parameter is a pointer, not the document.** ≤300 characters, ≤6 lines, line 1
-  ≤80; the spec goes in a payload file split into `## seg-NN`, and the parameter names
-  `file:` + `seg:` + `sha12:`. Build it with `scripts/anet_payload.sh compose`, verify it on the
-  worker side with `verify`, audit an existing body with `guard` (§1.2). The budgets are counted in
-  characters by python, never bytes by the shell — a C locale must not silently triple a CJK body.
+- **A long task is a pointer, never a paste.** The body is ≤300 characters; the spec goes in a
+  payload file split into `## seg-NN`, and the parameter names `file:` + `seg:` + `sha12:`. Build it
+  with `scripts/anet_payload.sh compose`, verify it on the worker side with `verify`, audit an
+  existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
+  the shell — a C locale must not silently triple a CJK body.
+- **A big file goes through the hub, not across disks.** `POST /api/upload` → `file_id` →
+  `send_task(meta.attachments=[{type:"file", file_id}])`. Measured limits that bite: 12 MiB per file,
+  20 attachments per task, 60 uploads per hour per token, `type` must be `"file"` (a malformed entry
+  is refused with `bad_attachments`, never dropped), download rights are network-scoped and a denied
+  read answers **404 not 403**. A manual node pulls them with `files` + `fetch --sha12` (§7).
 - **Online is not working.** A manual node with a healthy heartbeat and `sessions.status = idle`
   looks exactly like a node doing nothing while its task sits untouched. Read the task row, never the
   session row.

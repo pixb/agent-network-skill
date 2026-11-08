@@ -1,0 +1,78 @@
+== validate the eval spec
+   VALID agent-network-skill.eval.md
+== run the scenarios
+     [      pass] case-1 :: scenario-ran-cleanly
+     [      pass] case-1 :: scenario-checks-hold
+     [      pass] case-1 :: hub-row-is-the-source-of-truth
+     [      pass] case-1 :: transitions-follow-the-protocol
+     [      pass] case-1 :: no-parallel-work
+     [      pass] case-1 :: <baseline>
+     [      pass] case-2 :: scenario-ran-cleanly
+     [      pass] case-2 :: scenario-checks-hold
+     [      pass] case-2 :: hub-row-is-the-source-of-truth
+     [      pass] case-2 :: transitions-follow-the-protocol
+     [      pass] case-2 :: no-parallel-work
+     [      pass] case-2 :: <baseline>
+     [      pass] case-3 :: scenario-ran-cleanly
+     [      pass] case-3 :: scenario-checks-hold
+     [      pass] case-3 :: hub-row-is-the-source-of-truth
+     [      pass] case-3 :: transitions-follow-the-protocol
+     [      pass] case-3 :: no-parallel-work
+     [      pass] case-4 :: scenario-ran-cleanly
+     [      pass] case-4 :: scenario-checks-hold
+     [      pass] case-4 :: hub-row-is-the-source-of-truth
+     [      pass] case-4 :: transitions-follow-the-protocol
+     [      pass] case-4 :: no-parallel-work
+     [      pass] case-4 :: <baseline>
+     [      pass] case-5 :: scenario-ran-cleanly
+     [      pass] case-5 :: scenario-checks-hold
+     [      pass] case-5 :: hub-row-is-the-source-of-truth
+     [      pass] case-5 :: transitions-follow-the-protocol
+     [      pass] case-5 :: no-parallel-work
+     [      pass] case-5 :: <baseline>
+     [      pass] case-6 :: scenario-ran-cleanly
+     [      pass] case-6 :: scenario-checks-hold
+     [      pass] case-6 :: hub-row-is-the-source-of-truth
+     [      pass] case-6 :: transitions-follow-the-protocol
+     [      pass] case-6 :: no-parallel-work
+     [      pass] case-6 :: <baseline>
+     [      pass] case-7 :: scenario-ran-cleanly
+     [      pass] case-7 :: scenario-checks-hold
+     [      pass] case-7 :: hub-row-is-the-source-of-truth
+     [      pass] case-7 :: transitions-follow-the-protocol
+     [      pass] case-7 :: no-parallel-work
+     [      pass] case-7 :: <baseline>
+     [      pass] case-8 :: scenario-ran-cleanly
+     [      pass] case-8 :: scenario-checks-hold
+     [      pass] case-8 :: hub-row-is-the-source-of-truth
+     [      pass] case-8 :: transitions-follow-the-protocol
+     [      pass] case-8 :: no-parallel-work
+     [      pass] case-8 :: <baseline>
+     [      pass] case-9 :: scenario-ran-cleanly
+     [      pass] case-9 :: scenario-checks-hold
+     [      pass] case-9 :: hub-row-is-the-source-of-truth
+     [      pass] case-9 :: transitions-follow-the-protocol
+     [      pass] case-9 :: no-parallel-work
+     [      pass] case-9 :: <baseline>
+     [      pass] case-10 :: scenario-ran-cleanly
+     [      pass] case-10 :: scenario-checks-hold
+     [      pass] case-10 :: hub-row-is-the-source-of-truth
+     [      pass] case-10 :: transitions-follow-the-protocol
+     [      pass] case-10 :: no-parallel-work
+     [      pass] case-10 :: <baseline>
+     [      pass] case-11 :: scenario-ran-cleanly
+     [      pass] case-11 :: scenario-checks-hold
+     [      pass] case-11 :: hub-row-is-the-source-of-truth
+     [      pass] case-11 :: transitions-follow-the-protocol
+     [      pass] case-11 :: no-parallel-work
+     [      pass] case-11 :: <baseline>
+     [      pass] case-12 :: scenario-ran-cleanly
+     [      pass] case-12 :: scenario-checks-hold
+     [      pass] case-12 :: hub-row-is-the-source-of-truth
+     [      pass] case-12 :: transitions-follow-the-protocol
+     [      pass] case-12 :: no-parallel-work
+     [      pass] case-12 :: <baseline>
+   
+   rollout: 60 passed, 0 failed, 0 errored, 0 regressed
+== report: /tmp/skill-pipeline-3.json
+RESULT: PASS

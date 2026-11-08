@@ -72,6 +72,8 @@ parameters** — the long text lives in a payload file and the parameter carries
 ./scripts/anet_payload.sh verify  --file commhub_tasks/r07/spec.md --seg seg-01 \
     --sha12 3f7c64c57fb6 --print-body                                        # worker
 ./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit any body
+./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries
+./scripts/anet_manual_node.sh fetch <file_id> --out spec.md --sha12 <12 hex> # pull it through the hub
 ```
 
 ## Contents
@@ -80,9 +82,9 @@ parameters** — the long text lives in a payload file and the parameter carries
 |---|---|
 | [SKILL.md](SKILL.md) | The full protocol: connection and tokens, both role flows, state machine, parameter hard rules, the manual-node section, Gotchas |
 | [references/manual-node.md](references/manual-node.md) | Manual nodes in depth: one node one slot, the four transitions, how a task can leave you, token rules, the online-vs-working diagnosis, failure modes |
-| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets, the `## seg-NN` segment format, the sha12, `compose` guards, the two handoff routes, failure modes |
+| [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets, the `## seg-NN` segment format, the sha12, `compose` guards, the two handoff routes (git / hub attachment, with the 12 MiB · 20-file · 60-per-hour · 404-is-not-403 limits), failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what idle-expires, how to identify a token, revocation, environment contamination, the 401 |
-| [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check |
+| [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
 | [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `seg:` + `sha12:`), `verify` it on the worker side, `guard` an existing body, `list` the segments |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |
@@ -97,9 +99,10 @@ python3 scripts/run_evals.py               # run the behavioural checks
 bash tests/manual_node_e2e.sh              # the same scenarios, narrated end to end
 ```
 
-The scenarios need a commhub-server source tree to boot a throwaway hub from; point
-`ANET_E2E_HUB_SRC` at it, or put the path in each scenario file's `hub_source` field. Nothing
-touches a real hub.
+The scenarios need a commhub-server source tree to boot a throwaway hub from. Point
+`ANET_E2E_HUB_SRC` at it (the `server/` directory, or the repo root containing it); when this skill
+sits at `<repo>/.agents/skills/agent-network-skill` the tree is found relative to the skill
+directory, so the golden inputs carry no paths. Nothing touches a real hub.
 
 ## Verification
 

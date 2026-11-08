@@ -149,13 +149,56 @@ a finished task would strand it. The warning is the only signal that the run was
 ./anet_manual_node.sh working <task_id> 10 --node my-manual-node --project-root /path/to/project
 
 # 5. finish it
-./anet_manual_node.sh reply <task_id> "done: 301 images generated, report committed as abc1234" \
+./anet_manual_node.sh reply <task_id> "done: 3 unit tests green, report committed as abc1234" \
+  --node my-manual-node --project-root /path/to/project
+```
+
+If the dispatch carried attachments, insert between 3 and 4:
+
+```bash
+# 3a. what does this task carry?
+./anet_manual_node.sh files <task_id> --node my-manual-node --project-root /path/to/project
+
+# 3b. pull the bytes through the hub and prove the revision (exit 3 = conflict)
+./anet_manual_node.sh fetch <file_id> --out spec.md --sha12 <12 hex> \
   --node my-manual-node --project-root /path/to/project
 ```
 
 `working` and `reply` both verify their own effect against the hub and fail loudly
 rather than pretending: `working` re-reads the task and refuses to continue unless the hub
 now says `running`; `reply` re-reads the task and prints the resulting status.
+
+## Attachments: the hub carries the bytes, the node pulls them
+
+A runtime node downloads attachments by itself (`agent-node/src/runtime/fetch-attachment.ts`).
+A manual node has no runtime, so `files` and `fetch` are that step, done by hand:
+
+```bash
+./anet_manual_node.sh files <task_id>              # names them: file_id, name, mime, size
+./anet_manual_node.sh fetch <file_id> --out spec.md --sha12 54b3cd5aa536
+```
+
+What the hub enforces (measured, `server/src/uploads.ts` + `server/src/server.ts`):
+
+- `meta.attachments[]` (MCP `send_task`) or top-level `attachments` (REST `/api/task`): `type` must
+  be `"file"`, `file_id` is server-generated, **max 20 per task**, `size ≤ 12 MiB`. A malformed entry
+  is refused at dispatch with `bad_attachments` — it is never silently dropped.
+- Upload: `POST /api/upload` (multipart field `file`, authenticated as yourself with the access
+  string §0.2 describes) returns `{file_id, url, size, mime}`; the 12 MiB cap is checked twice
+  (Content-Length pre-check, then the parsed file); rate limit **60 uploads per hour per caller**
+  (429 `rate_limited`).
+- When a `file_id` is present the hub **strips any `path`** from the attachment — cross-machine
+  safety, the same rule that forbids absolute paths in a task body.
+- Download rights are **network-scoped**: the node's `ntok_` must be bound to the network the
+  file was uploaded in. A denied read answers **404, never 403** — so `fetch`'s "no such file for
+  this node" means unknown id, gone, or another network, not a bad secret.
+- `fetch` caps its own download at 50 MiB (`--max-bytes`), checks `Content-Length` before reading,
+  writes the file `0600`, prints `sha12`, and **refuses to write anything** when `--sha12` does not
+  match (exit 3 — the same signal `anet_payload.sh verify` gives: report the conflict).
+
+Attachments are for the bytes a git branch cannot carry (generated images, a dataset, a PDF, a
+screenshot). The task's acceptance text stays in the body's pointer and the payload segment; the hub
+never injects attachment content into the task text.
 
 ## Why "the dashboard says offline" is a presence-stream question, not a heartbeat one
 
@@ -455,6 +498,8 @@ name that no longer exists.
 | `task <id> not found` on `reply`, but the id is in your inbox | it is a **chat message**, not a task | `dm <from_session> "<text>"` |
 | heartbeat log says `hub unreachable` | wrong `--hub`, or the hub is down | fix the address in the config |
 | `node_owner_mismatch` on `init` | that alias belongs to another node id or owner | reuse the existing config, or pick another alias |
+| `no such file for this node` on `fetch` | the id is unknown, deleted, or was uploaded in **another network** (the hub answers 404, never 403) | `files <task_id>` to read the ids the task really carries; dispatch from the network the node belongs to |
+| `sha12 mismatch` on `fetch` (exit 3) | the file changed after dispatch | `reply` with the conflict; do not work on the bytes you happen to have |
 | 私信在 Dashboard 看不到 | `dm` 落 `user_inbox`，Dashboard 没有读它的页面 | 交付走 `reply --via send_reply`（落 `inbox`，Messages 页可见）；私信只作提醒 |
 | dashboard 上手动节点显示成登录名（如 `admin`） | 前端在 `nodes.owner_user_id` 为 null 时的回退标签，不是 hub 身份 | 派活只认节点真实 alias；`GET /api/status?alias=admin` 实测 0 行 |
 | 节点在 dashboard 永久离线、名字还被占用 | 本地删了、hub 行没删（残留） | `anet node delete <node_id> --hub-only --hub <url>` |

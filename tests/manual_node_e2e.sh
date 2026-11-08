@@ -248,5 +248,80 @@ run reply "$TASK4" "seg-01 done: 3 unit tests green" >/dev/null
 [ "$(task_status "$TASK4")" = "replied" ] || { echo "expected replied"; exit 1; }
 echo "   short body round-tripped byte-exactly: acked -> running -> replied"
 
+echo "== attachments: a task carries a file through the hub, the manual node pulls it"
+SPEC="$WORK/attach-spec.md"
+printf '%s\n' '# 附件规格' '' '## seg-01 附件里的规格正文' '这一段的正文由 hub 传输，不走两台机器的磁盘。' > "$SPEC"
+SPEC_SHA12=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()[:12])" "$SPEC")
+UPLOAD=$(curl -s -X POST "$HUB/api/upload" -H "Authorization: Bearer $UTOK" -F "file=@$SPEC;type=text/markdown")
+FILE_ID=$(printf '%s' "$UPLOAD" | jqq "['file_id']")
+[ -n "$FILE_ID" ] || { echo "upload failed: $UPLOAD"; exit 1; }
+echo "   uploaded: file_id=$FILE_ID sha12=$SPEC_SHA12"
+
+# A malformed attachment must be refused at dispatch, not silently dropped (#507).
+BAD=$(python3 - "$HUB" "$UTOK" "$NET" <<'PY'
+import json, sys, urllib.request, urllib.error
+hub, utok, net = sys.argv[1:4]
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": "bad attachment probe",
+                     "network_id": net, "attachments": [{"type": "document", "file_id": "abc12345"}]}).encode())
+try:
+    print(json.load(urllib.request.urlopen(req)).get("error", ""))
+except urllib.error.HTTPError as e:
+    print(json.loads(e.read()).get("error", ""))
+PY
+)
+[ "$BAD" = "bad_attachments" ] || { echo "a malformed attachment was not refused (got: ${BAD:-none})"; exit 1; }
+echo "   hub refused a malformed attachment: $BAD"
+
+ATT_TASK=$(python3 - "$HUB" "$UTOK" "$NET" "$FILE_ID" "$SPEC_SHA12" <<'PY'
+import json, sys, urllib.request
+hub, utok, net, file_id, sha12 = sys.argv[1:6]
+body = ("seg-01 附件规格：按附件正文执行\n"
+        f"attachment: {file_id}  sha12: {sha12}\n"
+        "work it in your own working directory; accept: the attachment's acceptance list\n"
+        "report_completion once, result <= 400 chars")
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": body, "network_id": net,
+                     "attachments": [{"type": "file", "file_id": file_id, "name": "spec.md",
+                                      "mime": "text/markdown"}]}).encode())
+print(json.load(urllib.request.urlopen(req))["task_id"])
+PY
+)
+echo "   task with attachment: $ATT_TASK"
+run ack "$ATT_TASK" >/dev/null
+FILES_OUT="$(run files "$ATT_TASK" 2>&1)"
+echo "$FILES_OUT" | sed 's/^/   /'
+case "$FILES_OUT" in *"carries 1 attachment"*"$FILE_ID"*) ;; *) echo "files did not name the attachment"; exit 1 ;; esac
+
+DL="$WORK/downloaded.md"
+FETCH_OUT="$(run fetch "$FILE_ID" --out "$DL" --sha12 "$SPEC_SHA12" 2>&1)"
+echo "$FETCH_OUT" | sed 's/^/   /'
+case "$FETCH_OUT" in *"sha12 $SPEC_SHA12"*) ;; *) echo "fetch did not report the sha12"; exit 1 ;; esac
+[ -f "$DL" ] || { echo "fetch wrote no file"; exit 1; }
+cmp -s "$SPEC" "$DL" || { echo "the fetched bytes differ from what was uploaded"; exit 1; }
+echo "   fetched bytes match the uploaded file (sha12 $SPEC_SHA12)"
+
+# A wrong revision is refused with exit 3 — the same signal anet_payload.sh verify gives.
+set +e
+BAD_FETCH="$(run fetch "$FILE_ID" --out "$WORK/never-written.md" --sha12 000000000000 2>&1)"
+RC=$?
+set -e
+echo "$BAD_FETCH" | sed 's/^/   /' | tail -2
+[ "$RC" = 3 ] || { echo "fetch accepted a sha12 that does not match (exit $RC)"; exit 1; }
+case "$BAD_FETCH" in *"sha12 mismatch"*) ;; *) echo "fetch did not name the sha12 conflict"; exit 1 ;; esac
+[ ! -f "$WORK/never-written.md" ] || { echo "the refused fetch left a file behind"; exit 1; }
+
+# An unknown / other-network id answers 404, never 403 (no enumeration oracle).
+set +e
+GONE="$(run fetch "deadbeefcafe0000" --out "$WORK/none.md" 2>&1)"
+RC=$?
+set -e
+echo "$GONE" | sed 's/^/   /' | tail -1
+case "$GONE" in *"no such file for this node"*) ;; *) echo "an unknown file_id was not reported as 404"; exit 1 ;; esac
+
 echo
-echo "ALL E2E ASSERTIONS PASSED"
+ echo "ALL E2E ASSERTIONS PASSED"

@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.1
+  version: 0.6.2
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.1
+  version: 0.6.2
   created: 2026-10-07
 ---
 
@@ -388,6 +388,13 @@ paths:
   name the `file_id` plus the sha12 on the pointer line. A payload file that only exists on the
   dispatcher's disk is worse than no file: the worker cannot read it, and an absolute path to it is
   forbidden anyway.
+- **Attachment limits are hard numbers, not hints** (§1.2): `type` must be `"file"` with a
+  server-generated `file_id`, **≤ 20 attachments per task**, **≤ 12 MiB per file**, **60 uploads per
+  hour per token** (429 `rate_limited`); a malformed entry is refused at dispatch (`bad_attachments`)
+  and the hub strips any `path` next to a `file_id`. Download rights are **network-scoped**, and a
+  denied read answers **404, never 403**. A runtime node pulls attachments itself
+  (`agent-node/src/runtime/fetch-attachment.ts`); a manual node uses
+  `anet_manual_node.sh files` + `fetch` (§7).
 - **Trust only the hub for state**: planners use `get_task` / `list_tasks` / `get_all_status`; workers
   use `get_inbox`.
 
@@ -463,6 +470,8 @@ machine that owns the node. It is the whole protocol, made explicit:
 ./anet_manual_node.sh working <task_id> 10 --node <alias> --project-root <dir>
 ./anet_manual_node.sh reply <task_id> "done: ..." --node <alias> --project-root <dir>
 ./anet_manual_node.sh dm <username> "..." --node <alias> --project-root <dir>   # reply to a HUMAN
+./anet_manual_node.sh files <task_id> --node <alias> --project-root <dir>        # the task's attachments
+./anet_manual_node.sh fetch <file_id> --out spec.md --sha12 <12 hex> --node <alias> --project-root <dir>
 ```
 
 Read `references/manual-node.md` for the full command set, the token rules, the failure modes, and

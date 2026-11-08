@@ -33,6 +33,16 @@
 #   anet_manual_node.sh dm      <username> "<text>" [--title "<title>"] [options]
 #                                                    chat to a HUMAN, task stays open
 #   anet_manual_node.sh check   [options]              hub-side truth report
+#   anet_manual_node.sh files   <task_id> [options]    the task's attachments (file_id + sha12)
+#   anet_manual_node.sh fetch   <file_id> [--out <path>] [--sha12 <12 hex>] [options]
+#                                                    pull an attachment through the hub
+#
+# Attachments: a task can carry meta.attachments = [{type:"file", file_id, ...}].
+# A runtime node downloads them by itself (agent-node/src/runtime/
+# fetch-attachment.ts); a manual node has no runtime, so `files` names them and
+# `fetch` pulls the bytes with this node's own token. The hub answers 404 - never
+# 403 - for a file the caller may not read, so "404" means unknown id, gone, or
+# another network, not "wrong password".
 #
 # options (flags override environment, environment overrides defaults):
 #   --node <alias>          manual node alias
@@ -42,13 +52,17 @@
 #   --network <id>          network id
 #   --interval <seconds>    heartbeat interval (default 30)
 #   --state-dir <dir>       where pid/log/status live (default: config dir)
+#   --out <path>            fetch: where to write the file (default: <state-dir>/attachments/<file_id>)
+#   --sha12 <12 hex>        fetch: refuse to accept the file unless sha256(file)[:12] matches
+#   --max-bytes <n>         fetch: byte cap for one download (default 52428800 = 50 MiB)
 #   --json                  machine-readable output where the command has any
 #   -h, --help              this text
 #
 # environment overrides:
 #   ANET_MANUAL_NODE, ANET_MANUAL_CONFIG, ANET_MANUAL_HUB, ANET_MANUAL_NETWORK,
 #   ANET_MANUAL_INTERVAL, ANET_MANUAL_STATE_DIR, ANET_MANUAL_TOKEN,
-#   ANET_MANUAL_USER_TOKEN
+#   ANET_MANUAL_USER_TOKEN, ANET_MANUAL_FETCH_OUT, ANET_MANUAL_FETCH_SHA12,
+#   ANET_MANUAL_MAX_BYTES
 #
 # The node token is read from the node config and is never printed.
 
@@ -56,7 +70,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 
-usage() { sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; }
 
 die() { echo "$SCRIPT_NAME: $*" >&2; exit "${2:-2}"; }
 
@@ -70,6 +84,9 @@ INTERVAL="${ANET_MANUAL_INTERVAL:-30}"
 STATE_DIR_OVERRIDE="${ANET_MANUAL_STATE_DIR:-}"
 TOKEN_OVERRIDE="${ANET_MANUAL_TOKEN:-}"
 USER_TOKEN_OVERRIDE="${ANET_MANUAL_USER_TOKEN:-}"
+FETCH_OUT="${ANET_MANUAL_FETCH_OUT:-}"
+FETCH_SHA12="${ANET_MANUAL_FETCH_SHA12:-}"
+MAX_FETCH_BYTES="${ANET_MANUAL_MAX_BYTES:-52428800}"
 JSON_OUT=0
 REPLY_VIA=""
 DM_TITLE=""
@@ -90,6 +107,9 @@ while [ $# -gt 0 ]; do
     --user-token) USER_TOKEN_OVERRIDE="${2:-}"; shift 2 ;;
     --via) REPLY_VIA="${2:-}"; shift 2 ;;
     --title) DM_TITLE="${2:-}"; shift 2 ;;
+    --out) FETCH_OUT="${2:-}"; shift 2 ;;
+    --sha12) FETCH_SHA12="${2:-}"; shift 2 ;;
+    --max-bytes) MAX_FETCH_BYTES="${2:-}"; shift 2 ;;
     --json) JSON_OUT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [ $# -gt 0 ]; do ARGS+=("$1"); shift; done ;;
@@ -166,7 +186,8 @@ chmod 700 "$STATE_DIR" 2>/dev/null || true
 write_client() {
   cat >"$CLIENT" <<'EOFJS'
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 
 const CONFIG = process.env.ANET_MANUAL_CONFIG;
 const STATUSFILE = process.env.ANET_MANUAL_STATUSFILE;
@@ -181,6 +202,12 @@ const DM_TITLE = process.env.ANET_MANUAL_DM_TITLE || "";
 const ALIAS_OVERRIDE = process.env.ANET_MANUAL_NODE || "";
 const JSON_OUT = process.env.ANET_MANUAL_JSON === "1";
 const ARGS = process.argv.slice(3);
+const FETCH_OUT = process.env.ANET_MANUAL_FETCH_OUT || "";
+const FETCH_SHA12 = (process.env.ANET_MANUAL_FETCH_SHA12 || "").trim().toLowerCase();
+// Byte cap for one attachment download, in BYTES (the same rule agent-node
+// applies in fetch-attachment.ts: assume the unit is bytes, check Content-Length
+// before reading the body, count the stream as a belt).
+const MAX_FETCH_BYTES = Number(process.env.ANET_MANUAL_MAX_BYTES || 50 * 1024 * 1024);
 const SCRIPT_NAME = "anet_manual_node.sh";
 
 const STATES = ["working", "idle", "blocked", "error", "waiting_input", "offline"];
@@ -519,6 +546,98 @@ async function showTask(id) {
   const r = await mcp("get_task", { task_id: id });
   console.log(JSON.stringify(r, null, 2));
   if (!r.ok) die(`task ${id}: ${r.error || "not found"}`, 5);
+}
+
+// ── attachments (bytes that travel through the hub, never across disks) ────
+// send_task / REST /api/task store attachments in tasks.meta_json AND copy them
+// into the inbox row's meta_json (server/src/uploads.ts validateAttachments:
+// type must be "file", file_id is server-generated, max 20, size <= 12 MiB).
+// get_task answers the raw column, so the JSON string has to be parsed here.
+function attachmentsOf(taskRow) {
+  if (!taskRow) return [];
+  let meta = taskRow.meta;
+  if (typeof taskRow.meta_json === "string") {
+    try { meta = JSON.parse(taskRow.meta_json); } catch { meta = null; }
+  }
+  const list = meta && Array.isArray(meta.attachments) ? meta.attachments : [];
+  return list.filter((a) => a && typeof a === "object" && typeof a.file_id === "string" && a.file_id);
+}
+
+function sha12Of(bytes) {
+  return createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+}
+
+async function filesTask(id) {
+  const r = await mcp("get_task", { task_id: id });
+  if (!r.ok) die(`task ${id}: ${r.error || "not found"}`, 5);
+  const list = attachmentsOf(r.task);
+  if (!list.length) {
+    console.log(`task ${id} carries no attachments`);
+    out({ ok: true, task_id: id, attachments: [] });
+    return;
+  }
+  console.log(`task ${id} carries ${list.length} attachment(s):`);
+  for (const a of list) {
+    console.log(
+      `  file_id=${a.file_id}` +
+      `${a.name ? ` name=${a.name}` : ""}` +
+      `${a.mime ? ` mime=${a.mime}` : ""}` +
+      `${a.size != null ? ` size=${a.size}B` : ""}`,
+    );
+    console.log(`  fetch: ${SCRIPT_NAME} fetch ${a.file_id} --node ${alias}`);
+  }
+  out({ ok: true, task_id: id, attachments: list });
+}
+
+async function fetchFile(id) {
+  if (!id) die("fetch needs a <file_id> (list them with: files <task_id>)", 2);
+  if (!token) die("fetch needs the node token — init the node first, or pass --token", 4);
+  const target = FETCH_OUT || join(dirname(CONFIG), "attachments", basename(id));
+  let res;
+  try {
+    res = await fetch(`${hub}/api/files/${encodeURIComponent(id)}`, {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token },
+    });
+  } catch (e) {
+    const why = e && e.cause && e.cause.message ? ` (${e.cause.message})` : "";
+    die(`hub unreachable (${hub}): ${e.message}${why}`, 3);
+  }
+  if (!res.ok) {
+    die(
+      res.status === 404
+        ? `no such file for this node: ${id} — the hub answers 404 (never 403) for an id that is
+         unknown, already gone, or belongs to another network; the node token is bound to its own
+         network, so a file uploaded in another network is unreadable here`
+        : `GET /api/files/${id} failed: HTTP ${res.status}`,
+      res.status === 401 ? 4 : 5,
+    );
+  }
+  const declared = Number(res.headers.get("content-length") || "0");
+  if (declared > MAX_FETCH_BYTES) {
+    die(`the hub offers ${declared} bytes, over the --max-bytes cap ${MAX_FETCH_BYTES} — refuse before reading`, 5);
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_FETCH_BYTES) {
+    die(`the body is ${bytes.byteLength} bytes, over the --max-bytes cap ${MAX_FETCH_BYTES}`, 5);
+  }
+  const sha12 = sha12Of(bytes);
+  // Prove the revision BEFORE writing: a refused fetch must not leave a file at
+  // the path the operator will type next. The bytes are already in memory, so
+  // hashing first is free, and the hub's 12 MiB upload cap bounds the buffer.
+  if (FETCH_SHA12 && sha12 !== FETCH_SHA12) {
+    die(
+      `sha12 mismatch: the hub's bytes hash to ${sha12}, the task body names ${FETCH_SHA12} — `
+      + "this is not the revision the dispatch pointed at. Report the conflict (reply with it), "
+      + "do not work on the file you happen to have. Nothing was written.",
+      3,
+    );
+  }
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  // 0600: the bytes are untrusted sender content, and its path shows up in logs.
+  writeFileSync(target, bytes, { mode: 0o600 });
+  console.log(`fetched ${id} -> ${target} (${bytes.byteLength}B, sha12 ${sha12})`);
+  out({ ok: true, file_id: id, path: target, bytes: bytes.byteLength, sha12 });
 }
 
 // The hub gives every node ONE session slot: (network_id, alias) is unique in
@@ -1127,6 +1246,10 @@ async function main() {
     await dmTo(ARGS[0], ARGS[1], DM_TITLE || process.env.ANET_MANUAL_DM_TITLE || "");
   } else if (MODE === "check") {
     await check();
+  } else if (MODE === "files") {
+    await filesTask(ARGS[0]);
+  } else if (MODE === "fetch") {
+    await fetchFile(ARGS[0]);
   } else {
     die("unknown mode: " + MODE, 2);
   }
@@ -1200,6 +1323,8 @@ cmd_run() {
   "ANET_MANUAL_TOKEN=$TOKEN_OVERRIDE" "ANET_MANUAL_USER_TOKEN=$USER_TOKEN_OVERRIDE" \
   "ANET_MANUAL_REPLY_VIA=$REPLY_VIA" "ANET_MANUAL_DM_TITLE=$DM_TITLE" \
   "ANET_MANUAL_JSON=$JSON_OUT" \
+  "ANET_MANUAL_FETCH_OUT=$FETCH_OUT" "ANET_MANUAL_FETCH_SHA12=$FETCH_SHA12" \
+  "ANET_MANUAL_MAX_BYTES=$MAX_FETCH_BYTES" \
     "$JSBIN" "$CLIENT" "$@"
 }
 
@@ -1231,6 +1356,8 @@ case "$COMMAND" in
   say) cmd_run say "${ARGS[@]}" ;;
   dm) cmd_run dm "${ARGS[@]}" ;;
   check) cmd_run check ;;
+  files) cmd_run files "${ARGS[@]}" ;;
+  fetch) cmd_run fetch "${ARGS[0]}" ;;
   ""|-h|--help|help) usage ;;
   *)
     echo "unknown command: $COMMAND (see: $SCRIPT_NAME --help)" >&2
