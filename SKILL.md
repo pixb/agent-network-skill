@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.3
+  version: 0.6.4
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.3
+  version: 0.6.4
   created: 2026-10-07
 ---
 
@@ -674,6 +674,25 @@ fetches that body from the hub (never retype it), and the human works the **file
 file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
 on the revision you happen to have. `reply` carries a ≤400-character `result` — conclusion, what you
 ran to verify it, and the path of the long report, which goes into the segment and gets committed.
+
+### 7.5 Two aliases, parallel dispatch, and timeout resend (operator order 2026-11-08)
+
+**An alias is not a node.** Read the `alias → node_id` mapping from `GET /api/status` (or from
+`send_task`'s `actual_to.to_node_id`) before you treat two aliases as two workers. Manual nodes often
+appear as two aliases (`...-manual-doubao` / `...-manual-doubao2`); they may be two channels of one
+machine or two separate nodes. Parallel dispatch is real **only when the `node_id`s differ** — on one
+node the second task overwrites the first in the session row (§Gotchas, "a node has ONE task slot").
+
+When the operator grants parallel dispatch, apply it as **one task per alias, never the same segment
+to both aliases**: two deliveries of one segment produce two competing `sha12` for one file and the
+ledger cannot record both. Pick two different segments, dispatch one to each, and record both task ids.
+
+**Timeout = `expired` with an empty `result` and no arrival.** Read the task row, not the session row:
+a row with `status: expired`, a non-empty `completed_at` and an empty `result`, plus no commit in the
+target repo, is a **timed-out task, not a delivery**. Resend it as a **new task** with the same
+4-line pointer (`file:` / `seg:` / `sha12:` unchanged, fresh ttl), and record in the ledger
+`expired_task_ids: [<old id>]` next to the new dispatch id. Never accept, grade, or count an
+`expired` row as an arrival, and keep the original payload segment as the single source of the spec.
 
 ## Gotchas
 
