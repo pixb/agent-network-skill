@@ -72,6 +72,8 @@ parameters** — the long text lives in a payload file and the parameter carries
 ./scripts/anet_payload.sh verify  --file commhub_tasks/r07/spec.md --seg seg-01 \
     --sha12 3f7c64c57fb6 --print-body                                        # worker
 ./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit any body
+ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/spec.md \
+    --hub "$COMMHUB_URL" --network <network_id> --allow-untracked            # put the bytes on the hub
 ./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries
 ./scripts/anet_manual_node.sh fetch <file_id> --out spec.md --sha12 <12 hex> # pull it through the hub
 ```
@@ -85,7 +87,7 @@ parameters** — the long text lives in a payload file and the parameter carries
 | [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets, the `## seg-NN` segment format, the sha12, `compose` guards, the two handoff routes (git / hub attachment, with the 12 MiB · 20-file · 60-per-hour · 404-is-not-403 limits), failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what idle-expires, how to identify a token, revocation, environment contamination, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `seg:` + `sha12:`), `verify` it on the worker side, `guard` an existing body, `list` the segments |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `seg:` + `sha12:`), `verify` it on the worker side, `guard` an existing body, `list` the segments, `upload` the file through the hub (prints file_id + sha12 + the pointer line) |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |
 | [AGENTS.md](AGENTS.md) | Directory-level notes: purpose, triggers, contents, Gotchas |

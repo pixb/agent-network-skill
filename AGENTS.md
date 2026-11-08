@@ -35,7 +35,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
 | [references/payload-files.md](references/payload-files.md) | Short parameters in depth: budgets, `## seg-NN` segment format, the sha12, `compose` guards, handoff routes (git / hub attachment, with its measured limits), failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what expires, how to identify a token, revocation, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | Run this on the manual node's machine: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and prove it: `compose`, `verify`, `guard`, `list` |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Compose a short pointer body (`file:` + `seg:` + `sha12:`) and prove it: `compose`, `verify`, `guard`, `list`, `upload` (bytes through the hub) |
 | [scripts/run_evals.py](scripts/run_evals.py) | The eval runner: `python3 scripts/run_evals.py` gates the skill's behaviour |
 | [evals/](evals/) | The eval spec and its golden cases (real hubs, real tasks) |
 | [tests/](tests/) | The same scenarios run end to end, narrated |
@@ -54,11 +54,14 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   with `scripts/anet_payload.sh compose`, verify it on the worker side with `verify`, audit an
   existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
   the shell — a C locale must not silently triple a CJK body.
-- **A big file goes through the hub, not across disks.** `POST /api/upload` → `file_id` →
-  `send_task(meta.attachments=[{type:"file", file_id}])`. Measured limits that bite: 12 MiB per file,
-  20 attachments per task, 60 uploads per hour per token, `type` must be `"file"` (a malformed entry
-  is refused with `bad_attachments`, never dropped), download rights are network-scoped and a denied
-  read answers **404 not 403**. A manual node pulls them with `files` + `fetch --sha12` (§7).
+- **A big file goes through the hub, not across disks.** `bash scripts/anet_payload.sh upload
+  --file <relpath> --hub <url> --network <id>` → `file_id` + sha12 + the pointer line, and the same
+  command's `meta.attachments` entry to dispatch with. Measured limits that bite: 12 MiB per file
+  (refused by the script before the wire), 20 attachments per task, 60 uploads per hour per caller,
+  `type` must be `"file"` (a malformed entry is refused with `bad_attachments`, never dropped),
+  download rights are network-scoped and a denied read answers **404 not 403**. A manual node pulls
+  them with `files` + `fetch --sha12` (§7). The access string is read from `ANET_TOKEN` in the
+  environment and is never an option value: argv is readable in `ps` and in shell history.
 - **Online is not working.** A manual node with a healthy heartbeat and `sessions.status = idle`
   looks exactly like a node doing nothing while its task sits untouched. Read the task row, never the
   session row.

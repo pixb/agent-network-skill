@@ -171,7 +171,10 @@ now says `running`; `reply` re-reads the task and prints the resulting status.
 ## Attachments: the hub carries the bytes, the node pulls them
 
 A runtime node downloads attachments by itself (`agent-node/src/runtime/fetch-attachment.ts`).
-A manual node has no runtime, so `files` and `fetch` are that step, done by hand:
+A manual node has no runtime, so `files` and `fetch` are that step, done by hand. The dispatcher puts
+the file there with `bash scripts/anet_payload.sh upload --file <relpath> --hub <url> --network <id>`
+(prints `file_id`, sha12 and the pointer line; the access string comes from `ANET_TOKEN` in the
+environment, never from argv):
 
 ```bash
 ./anet_manual_node.sh files <task_id>              # names them: file_id, name, mime, size

@@ -12,6 +12,20 @@ Measured: a runtime node auto-fetches attachments (agent-node/src/runtime/fetch-
 - `raw/2026-11-08T021405Z-03f98b5e7219.log` — the narrated run whose last line is `ALL E2E ASSERTIONS PASSED`; its attachment block uploads a file, dispatches a task carrying it, asserts `bad_attachments` for a malformed entry, runs `files`, fetches the bytes (117B) with a matching sha12, refuses a wrong sha12 with exit 3 and leaves no file, and reports an unknown id as 404.
 - `raw/2026-11-08T021404Z-bca66563c29c.json` — the 12-scenario pipeline report (60 checks, 0 failed) run in the same session
 
-## Proposed next experiment
+## Follow-up shipped in v0.6.3
 
-Define one atomic candidate change and validate it on held-out cases.
+The dispatcher's half was missing: the docs told a planner to write a multipart curl by hand, with a
+secret on the command line. `anet_payload.sh upload` is now that step — 12 MiB refused before a byte
+goes on the wire, untracked file needs `--allow-untracked`, access string read from `ANET_TOKEN` in the
+environment (never argv: argv is readable in `ps` and shell history), header passed to curl through a
+config on stdin, and it prints file_id + sha12 + the pointer line + the meta.attachments entry. The
+cross-network rule, previously a code reading, is now measured: a node in network B fetching a file
+uploaded in network A gets the 404 path, writes nothing, exits non-zero.
+
+## Evidence (v0.6.3)
+
+- `raw/2026-11-08T024525Z-7a30461dbacb.log` — narrated E2E: upload via the script, 13 MiB refused naming the cap,
+  upload refuses to run without `ANET_TOKEN`, `bad_attachments` at dispatch, `files`, byte-exact `fetch`
+  with sha12, sha12 mismatch exits 3 and writes nothing, unknown id 404, **cross-network node refused (404, writes nothing)**
+- `raw/2026-11-08T024525Z-bca66563c29c.json` / `raw/2026-11-08T024525Z-2cc46336cfb2.log` — pipeline `RESULT: PASS`,
+  84 checks 0 failed, including the two new command criteria that lock the shape rule and the character count

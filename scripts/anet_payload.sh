@@ -32,6 +32,13 @@
 #       guards apply, so a test can assert the rule against a stored body without
 #       duplicating the pattern — and it counts characters in python, so a C locale
 #       cannot turn a 100-character Chinese body into a 300-byte one.
+#   anet_payload.sh upload  --file <relpath> [--hub <url>] [--network <id>]
+#                           [--name <n>] [--mime <m>] [--allow-untracked] [--json]
+#       the dispatcher's half of the hub-attachment route: put these bytes on the hub,
+#       print the file_id, the sha12, the pointer line to paste and the meta.attachments
+#       entry to dispatch with. 12 MiB is refused before anything goes on the wire; the
+#       access string is read from ANET_TOKEN in the environment and is deliberately not
+#       an option, because an argv value lands in ps and in shell history.
 #
 # segment convention (in the payload file):
 #   ## seg-01 <title>
@@ -51,10 +58,16 @@
 #   --allow-dirty         do not refuse a file with uncommitted changes
 #   --allow-untracked     do not refuse a file that is not in git
 #   --force               compose even when a guard rejects the body
+#   --hub <url>           upload: the hub to put the file on (default: $ANET_HUB)
+#   --network <id>        upload: which network the file is attributed to
+#   --name <name>         upload: the name the worker sees (default: the file name)
+#   --mime <mime>         upload: the media type (default: application/octet-stream)
 #   -h, --help            this text
 #
-# Needs bash + python3. Writes nothing except --print-body output; it never
-# touches the hub, so it is not a commhub call and does not spend the round.
+# Needs bash + python3 (and curl for `upload`). It writes nothing to the working tree.
+# `guard`/`compose`/`verify`/`list` never touch the hub, so they are not a commhub call
+# and do not spend the round; `upload` is one HTTP call to the hub, not a commhub tool
+# call — it does not move a task, so it does not spend a task round either.
 
 set -euo pipefail
 
@@ -77,6 +90,10 @@ shift
 
 FILE="" SEG="" SUMMARY="" ACCEPT="" DELIVER="" BRANCH="" MAX="300"
 BODY_ARG="" SUMMARY_MAX="80"
+HUB_ARG="" NETWORK="" FNAME="" MIME="application/octet-stream"
+# The hub's own cap, measured in server/src/uploads.ts (MAX_UPLOAD_BYTES). It is stated
+# as a number here so a 40 MB dataset is refused before a byte is put on the wire.
+MAX_UPLOAD_BYTES=12582912
 SHA12="" PROJECT="${ANET_PAYLOAD_PROJECT:-$PWD}"
 JSON=0 PRINT_BODY=0 ALLOW_DIRTY=0 ALLOW_UNTRACKED=0 FORCE=0
 
@@ -93,6 +110,10 @@ while [ $# -gt 0 ]; do
     --body) BODY_ARG="${2:-}"; shift 2 ;;
     --sha12) SHA12="${2:-}"; shift 2 ;;
     --project-root) PROJECT="${2:-}"; shift 2 ;;
+    --hub) HUB_ARG="${2:-}"; shift 2 ;;
+    --network) NETWORK="${2:-}"; shift 2 ;;
+    --name) FNAME="${2:-}"; shift 2 ;;
+    --mime) MIME="${2:-}"; shift 2 ;;
     --json) JSON=1; shift ;;
     --print-body) PRINT_BODY=1; shift ;;
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
@@ -299,6 +320,73 @@ d = json.loads(sys.argv[1])
 for s in d['segments']:
     print(f"  {s['seg']}  line {s['line']}  {s['title']}")
 PY
+    exit 0
+    ;;
+  upload)
+    # The dispatcher's half of the hub-attachment route: this file's bytes go through
+    # the hub and come back as a file_id. Needs curl; the access string is taken from
+    # the environment ONLY, because an argv value lands in `ps` output and in shell
+    # history, and a task body must never carry one either.
+    command -v curl >/dev/null 2>&1 || die "upload needs curl" 1
+    HUB="${HUB_ARG:-${ANET_HUB:-}}"
+    [ -n "$HUB" ] || die "upload needs the hub: --hub <url> or ANET_HUB (the same address the node config uses)" 1
+    [ -n "${ANET_TOKEN:-}" ] || die "upload needs ANET_TOKEN in the environment (export ANET_TOKEN=…): the token is deliberately NOT a command-line option, because argv is readable in ps and in shell history" 1
+    SIZE="$(python3 -c 'import os,sys;print(os.path.getsize(sys.argv[1]))' "$FULL")"
+    [ "$SIZE" -le "$MAX_UPLOAD_BYTES" ] || die "the file is $SIZE bytes; the hub caps one upload at $MAX_UPLOAD_BYTES (12 MiB) — split it, or ship it on the branch" 3
+    [ -n "$FNAME" ] || FNAME="$(basename "$FILE")"
+    git_state
+    if [ "$(git_get in_git)" = "True" ] && [ "$(git_get tracked)" != "True" ]; then
+      [ "$ALLOW_UNTRACKED" = 1 ] || die "the file is not in git ($FILE): pass --allow-untracked to say you mean to ship these bytes through the hub rather than through the branch" 3
+    fi
+    # `dirty` is NOT refused here: on this route the bytes travel, and the sha12 pins
+    # exactly which bytes travelled. (The git route refuses them — there the worker
+    # pulls a branch, not your working tree.)
+    URL="$HUB/api/upload"
+    [ -n "$NETWORK" ] && URL="$URL?network_id=$NETWORK"
+    # The secret goes to curl through a config file on stdin (-K -), never on argv.
+    RAW="$(printf 'header = "Authorization: Bearer %s"\n' "$ANET_TOKEN" \
+            | curl -sS -K - -w '\n%{http_code}' \
+                  -F "file=@${FULL};type=${MIME};filename=${FNAME}" "$URL" 2>&1)"
+    CODE="${RAW##*$'\n'}"
+    OUT="${RAW%$'\n'*}"
+    case "$CODE" in
+      200|201) ;;
+      429) die "the hub answered rate_limited (60 uploads per hour per caller): one file per round, not one per task" 4 ;;
+      413) die "the hub answered file_too_large: one file is capped at 12 MiB" 4 ;;
+      401|403) die "the hub refused the access string (HTTP $CODE): it must be a token valid for this hub, and the network the file lands in must be one its owner can use" 4 ;;
+      *) die "upload failed: HTTP ${CODE:-no response} — $(printf '%s' "$OUT" | head -c 300)" 4 ;;
+    esac
+    FILE_ID="$(printf '%s' "$OUT" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("file_id", ""))
+except Exception:
+    print("")' )"
+    [ -n "$FILE_ID" ] || die "the hub answered HTTP $CODE without a file_id: $(printf '%s' "$OUT" | head -c 300)" 4
+    FILESHA="$(python3 -c 'import hashlib,sys
+h = hashlib.sha256()
+with open(sys.argv[1], "rb") as fh:
+    for chunk in iter(lambda: fh.read(65536), b""):
+        h.update(chunk)
+print(h.hexdigest()[:12])' "$FULL")"
+    if [ "$JSON" = 1 ]; then
+      python3 - "$FILE" "$FILE_ID" "$FILESHA" "$SIZE" "$FNAME" "$MIME" "$NETWORK" <<'PY'
+import json, sys
+rel, fid, sha, size, name, mime, net = sys.argv[1:8]
+print(json.dumps({
+    "ok": True, "file": rel, "file_id": fid, "sha12": sha, "bytes": int(size),
+    "name": name, "mime": mime, "network": net or None,
+    "pointer_line": f"attachment: {fid}  sha12: {sha}",
+    "meta": {"attachments": [{"type": "file", "file_id": fid, "name": name, "mime": mime, "size": int(size)}]},
+}, ensure_ascii=False, indent=2))
+PY
+      exit 0
+    fi
+    echo "uploaded: $FILE ($SIZE bytes) -> file_id $FILE_ID"
+    echo "sha12: $FILESHA"
+    echo "put on the pointer line:  attachment: $FILE_ID  sha12: $FILESHA"
+    echo "and in the dispatch:  meta.attachments = [{type: \"file\", file_id: \"$FILE_ID\", name: \"$FNAME\", mime: \"$MIME\", size: $SIZE}]"
+    warn "the hub generates the file_id (^[A-Za-z0-9_-]{8,64}$) and strips any path beside it: your local path never travels"
+    [ -n "$NETWORK" ] || warn "no --network given: with a user token the upload can land unattributed, and an unattributed file is refused (cross_network_file) for a node token — name the network the worker belongs to"
     exit 0
     ;;
   compose|verify) ;;

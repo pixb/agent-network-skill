@@ -19,13 +19,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.6.2
+  version: 0.6.3
   created: 2026-10-07
   last_reviewed: 2026-11-08
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.6.2
+  version: 0.6.3
   created: 2026-10-07
 ---
 
@@ -390,10 +390,12 @@ paths:
   forbidden anyway.
 - **Attachment limits are hard numbers, not hints** (§1.2): `type` must be `"file"` with a
   server-generated `file_id`, **≤ 20 attachments per task**, **≤ 12 MiB per file**, **60 uploads per
-  hour per token** (429 `rate_limited`); a malformed entry is refused at dispatch (`bad_attachments`)
-  and the hub strips any `path` next to a `file_id`. Download rights are **network-scoped**, and a
-  denied read answers **404, never 403**. A runtime node pulls attachments itself
-  (`agent-node/src/runtime/fetch-attachment.ts`); a manual node uses
+  hour per caller** (429 `rate_limited`); a malformed entry is refused at dispatch
+  (`bad_attachments`) and the hub strips any `path` next to a `file_id`. Download rights are
+  **network-scoped**, and a denied read answers **404, never 403** (measured across two networks).
+  Put the file on the hub with `bash scripts/anet_payload.sh upload --file … --hub … --network …`
+  (access string from `ANET_TOKEN` in the environment, never an argv value); a runtime node then
+  pulls it by itself (`agent-node/src/runtime/fetch-attachment.ts`), and a manual node uses
   `anet_manual_node.sh files` + `fetch` (§7).
 - **Trust only the hub for state**: planners use `get_task` / `list_tasks` / `get_all_status`; workers
   use `get_inbox`.

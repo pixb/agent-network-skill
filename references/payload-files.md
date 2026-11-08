@@ -157,18 +157,29 @@ failure you will hit in a long run:
 | per token | **60 uploads/hour** | 429 `rate_limited` — do not re-upload one file per task in a busy round |
 | entry shape | `type: "file"` + server-generated `file_id` | `bad_attachments` at dispatch, never a silent drop |
 | `path` in an entry | stripped by the hub when `file_id` is present | the worker never sees your disk path (by design) |
-| who may download | network-scoped: the node's `ntok_` must be bound to the upload's network | **404, never 403** |
+| who may download | network-scoped: the node's `ntok_` must be bound to the upload's network | **404, never 403** (measured across two networks in `tests/manual_node_e2e.sh`) |
 
 ```bash
-# dispatcher. The hub address and your own access string come from the environment (§0.2);
-# never paste a value into a command line, a log, or a task body.
-FILE_ID=$(curl -s -X POST -F "file=@commhub_tasks/r07/spec.md;type=text/markdown" \
-              -H "Authorization: Bearer $COMMHUB_ACCESS" "$COMMHUB_URL/api/upload" \
-          | python3 -c 'import json,sys;print(json.load(sys.stdin)["file_id"])')
+# dispatcher: the payload script's own command. The hub address comes from --hub/$ANET_HUB,
+# the access string from ANET_TOKEN in the environment — deliberately NOT an option, because
+# an argv value lands in `ps` output and in shell history. 12 MiB is refused here, before a
+# byte goes on the wire, and an untracked file needs --allow-untracked (say you mean to ship
+# bytes through the hub, not through the branch).
+ANET_TOKEN=… bash scripts/anet_payload.sh upload --file commhub_tasks/r07/spec.md \
+    --hub "$COMMHUB_URL" --network <network_id> --name spec.md --mime text/markdown \
+    --allow-untracked
+#   uploaded: commhub_tasks/r07/spec.md (5123 bytes) -> file_id 3c63099f0bf34bf398708698da2decaf
+#   sha12: 54b3cd5aa536
+#   put on the pointer line:  attachment: 3c63099f…  sha12: 54b3cd5aa536
+#   and in the dispatch:  meta.attachments = [{type: "file", file_id: "3c63099f…", …}]
 bash scripts/anet_payload.sh compose --file commhub_tasks/r07/spec.md --seg seg-01 \
     --summary "第7轮 seg-01：给导出函数补单元测试，3 个用例全绿" --allow-untracked
 # then send_task(alias=…, task=<the pointer, with `attachment: <file_id>` added>,
 #                meta={attachments: [{type: "file", file_id: "<file_id>"}]})
+# Underneath, `upload` is one multipart POST — this is the shape it sends, for when you
+# must debug it by hand:
+#   curl -sS -K - -F "file=@commhub_tasks/r07/spec.md;type=text/markdown" "$COMMHUB_URL/api/upload"
+#   (the config on stdin carries the Authorization header, so the secret stays off argv)
 
 # worker (runtime node): fetch-attachment.ts pulls it automatically and hands the
 # model a local path (text/markdown, txt, json, csv, pdf, docx and images are on

@@ -55,6 +55,10 @@ say-so):
   scenario *should* have taken the long way is asserted by that scenario's own
   checks, not by this one.
 - **no parallel work** — the scenario never had two tasks running on one node
+- **`guard` refuses absolute paths by shape** — a body carrying `/etc/x`, `~/x`, `C:\x` or
+  `\\host\share` is refused, on any machine, with no mount prefix listed anywhere in the script
+- **`guard` counts characters, not bytes** — the same CJK body measures the same under `LC_ALL=C`
+  and under the ambient locale (a byte count would triple it and reject a compliant body)
   at once (a node has a single slot; the second task must wait)
 
 ```json
@@ -66,7 +70,9 @@ say-so):
     {"id": "scenario-checks-hold", "text": "Every fact the scenario verified against the hub holds", "type": "command", "cmd": "python3 -c \"import json,sys;d=json.load(open('{output}'));c=d['checks'];sys.exit(0 if all(v for v in c.values() if v) and any(c.values()) else 1)\""},
     {"id": "hub-row-is-the-source-of-truth", "text": "The final status was read back from the hub task row and matches the last observed transition", "type": "command", "cmd": "python3 -c \"import json,sys;d=json.load(open('{output}'));s=[t.split(':',1)[1] for t in d['transitions'] if t.startswith('status:')];sys.exit(0 if s and d['final_status']==s[-1] else 1)\""},
     {"id": "transitions-follow-the-protocol", "text": "The observed status sequence is a legal path through the task lifecycle", "type": "command", "cmd": "python3 -c \"import json,sys;d=json.load(open('{output}'));s=[t.split(':',1)[1] for t in d['transitions'] if t.startswith('status:')];legal=[['delivered'],['delivered','acked'],['delivered','acked','running'],['delivered','acked','running','replied'],['delivered','replied'],['delivered','acked','replied']];sys.exit(0 if s in legal else 1)\""},
-    {"id": "no-parallel-work", "text": "The scenario never had two tasks running on one node at the same time", "type": "command", "cmd": "python3 -c \"import json,sys;d=json.load(open('{output}'));s=[t.split(':',1)[1] for t in d['transitions'] if t.startswith('status:')];sys.exit(0 if s.count('running')<=1 else 1)\""}
+    {"id": "no-parallel-work", "text": "The scenario never had two tasks running on one node at the same time", "type": "command", "cmd": "python3 -c \"import json,sys;d=json.load(open('{output}'));s=[t.split(':',1)[1] for t in d['transitions'] if t.startswith('status:')];sys.exit(0 if s.count('running')<=1 else 1)\""},
+    {"id": "guard-refuses-absolute-path", "text": "scripts/anet_payload.sh guard refuses a body carrying a path a second machine cannot open (POSIX and Windows shapes)", "type": "command", "cmd": "bash scripts/anet_payload.sh guard --body \"读 /etc/passwd 与 C:\\\\proj\\\\x.md\" >/dev/null 2>&1; test $? -ne 0"},
+    {"id": "guard-counts-characters-not-bytes", "text": "The budget is counted in characters: the same CJK body measures identically under a C locale and the ambient locale", "type": "command", "cmd": "a=$(LC_ALL=C bash scripts/anet_payload.sh guard --body \"第7轮 seg-01：给导出函数补单元测试，3 个用例全绿，验收是三条用例通过且报错指向行号\" --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"chars\"])'); b=$(env -u LC_ALL -u LANG bash scripts/anet_payload.sh guard --body \"第7轮 seg-01：给导出函数补单元测试，3 个用例全绿，验收是三条用例通过且报错指向行号\" --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"chars\"])'); test -n \"$a\" && test \"$a\" = \"$b\""}
   ],
   "golden": [
     {"id": "case-1", "input": "golden/case-1/input.json", "expected": null, "split": "val", "expected_status": "pending-first-green"},

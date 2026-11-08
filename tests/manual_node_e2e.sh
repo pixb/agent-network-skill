@@ -252,10 +252,32 @@ echo "== attachments: a task carries a file through the hub, the manual node pul
 SPEC="$WORK/attach-spec.md"
 printf '%s\n' '# 附件规格' '' '## seg-01 附件里的规格正文' '这一段的正文由 hub 传输，不走两台机器的磁盘。' > "$SPEC"
 SPEC_SHA12=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()[:12])" "$SPEC")
-UPLOAD=$(curl -s -X POST "$HUB/api/upload" -H "Authorization: Bearer $UTOK" -F "file=@$SPEC;type=text/markdown")
-FILE_ID=$(printf '%s' "$UPLOAD" | jqq "['file_id']")
-[ -n "$FILE_ID" ] || { echo "upload failed: $UPLOAD"; exit 1; }
-echo "   uploaded: file_id=$FILE_ID sha12=$SPEC_SHA12"
+# The dispatcher's half is the payload script's own command, not an ad-hoc curl.
+UPLOAD_JSON="$(ANET_TOKEN="$UTOK" "$PAYLOAD_SH" upload --project-root "$WORK" --file attach-spec.md \
+    --hub "$HUB" --network "$NET" --name spec.md --mime text/markdown --allow-untracked --json)"
+FILE_ID=$(printf '%s' "$UPLOAD_JSON" | jqq "['file_id']")
+UP_SHA=$(printf '%s' "$UPLOAD_JSON" | jqq "['sha12']")
+[ -n "$FILE_ID" ] || { echo "upload failed: $UPLOAD_JSON"; exit 1; }
+[ "$UP_SHA" = "$SPEC_SHA12" ] || { echo "upload reported sha12 $UP_SHA, the file hashes to $SPEC_SHA12"; exit 1; }
+echo "   uploaded via anet_payload.sh: file_id=$FILE_ID sha12=$SPEC_SHA12"
+
+# 12 MiB is refused before a byte goes on the wire.
+BIG="$WORK/big.bin"; dd if=/dev/zero of="$BIG" bs=1M count=13 status=none
+set +e
+BIG_OUT="$(ANET_TOKEN="$UTOK" "$PAYLOAD_SH" upload --project-root "$WORK" --file big.bin --hub "$HUB" --network "$NET" --allow-untracked 2>&1)"
+RC=$?; set -e
+echo "$BIG_OUT" | sed 's/^/   /'
+[ "$RC" = 3 ] || { echo "a 13 MiB file was not refused (exit $RC)"; exit 1; }
+case "$BIG_OUT" in *"12 MiB"*) ;; *) echo "the size refusal did not name the cap"; exit 1 ;; esac
+rm -f "$BIG"
+
+# The access string is an env var by design: argv is readable in ps and shell history.
+set +e
+NOAUTH_OUT="$(env -u ANET_TOKEN "$PAYLOAD_SH" upload --project-root "$WORK" --file attach-spec.md --hub "$HUB" --network "$NET" --allow-untracked 2>&1)"
+RC=$?; set -e
+[ "$RC" != 0 ] || { echo "upload ran with no ANET_TOKEN in the environment"; exit 1; }
+case "$NOAUTH_OUT" in *"ANET_TOKEN"*) ;; *) echo "the missing-token refusal did not name ANET_TOKEN"; exit 1 ;; esac
+echo "   upload refuses to run without ANET_TOKEN in the environment (never an argv value)"
 
 # A malformed attachment must be refused at dispatch, not silently dropped (#507).
 BAD=$(python3 - "$HUB" "$UTOK" "$NET" <<'PY'
@@ -315,13 +337,31 @@ echo "$BAD_FETCH" | sed 's/^/   /' | tail -2
 case "$BAD_FETCH" in *"sha12 mismatch"*) ;; *) echo "fetch did not name the sha12 conflict"; exit 1 ;; esac
 [ ! -f "$WORK/never-written.md" ] || { echo "the refused fetch left a file behind"; exit 1; }
 
-# An unknown / other-network id answers 404, never 403 (no enumeration oracle).
+# An unknown id answers 404, never 403 (no enumeration oracle).
 set +e
 GONE="$(run fetch "deadbeefcafe0000" --out "$WORK/none.md" 2>&1)"
 RC=$?
 set -e
 echo "$GONE" | sed 's/^/   /' | tail -1
 case "$GONE" in *"no such file for this node"*) ;; *) echo "an unknown file_id was not reported as 404"; exit 1 ;; esac
+
+# …and so does a REAL file that lives in another network: download rights are
+# network-scoped, and the hub keeps that a 404 too.
+REG2=$(curl -s -X POST "$HUB/api/auth/register" -H 'Content-Type: application/json' \
+  -d '{"username":"e2eother","password":"e2e-password-12345"}')
+UTOK2=$(echo "$REG2" | jqq "['token']"); NET2=$(echo "$REG2" | jqq "['network_id']")
+[ "$NET2" != "$NET" ] || { echo "the second user did not get its own network"; exit 1; }
+PROJ2="$WORK/project2"; mkdir -p "$PROJ2"
+ANET_MANUAL_USER_TOKEN="$UTOK2" "$SCRIPT" init --node e2e-manual-node --project-root "$PROJ2" --hub "$HUB" >/dev/null
+run2() { "$SCRIPT" "$@" --project-root "$PROJ2" --hub "$HUB"; }
+set +e
+OTHER="$(run2 fetch "$FILE_ID" --out "$WORK/other-network.md" 2>&1)"
+RC=$?; set -e
+echo "$OTHER" | sed 's/^/   /' | tail -1
+[ "$RC" != 0 ] || { echo "a node read a file from another network"; exit 1; }
+case "$OTHER" in *"no such file for this node"*) ;; *) echo "the cross-network read was not reported as 404"; exit 1 ;; esac
+[ ! -f "$WORK/other-network.md" ] || { echo "the refused cross-network fetch left a file behind"; exit 1; }
+echo "   node of network $NET2 cannot read the file uploaded in $NET (hub answers 404, not 403)"
 
 echo
  echo "ALL E2E ASSERTIONS PASSED"

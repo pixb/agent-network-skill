@@ -41,3 +41,17 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/anet_manual_node.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/hub-attachment-route-for-manual-nodes.md`
+
+## 2026-11-08T02:45:56Z — accepted
+
+- Proposal: `dispatcher-upload-command-v063`
+- Target: `scripts/anet_payload.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/hub-attachment-route-for-manual-nodes.md`
+
+## 2026-11-08T02:45:56Z — accepted
+
+- Proposal: `portability-proof-from-foreign-worktree`
+- Target: `tests/manual_node_e2e.sh`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/portable-protocol-content.md`
