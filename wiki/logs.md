@@ -45,3 +45,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-09T05:17:21Z — pattern added
 
 - `budgets-live-in-one-file`
+
+## 2026-11-09T06:51:30Z — pattern added
+
+- `formatting-is-graded-by-line`

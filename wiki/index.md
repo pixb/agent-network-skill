@@ -14,3 +14,4 @@ Evidence-linked draft patterns for skill maintenance. Do not load this file at r
 - [brief-body-in-the-parameter](patterns/brief-body-in-the-parameter.md) — draft
 - [receiving-end-and-retryable-failure](patterns/receiving-end-and-retryable-failure.md) — draft
 - [budgets-live-in-one-file](patterns/budgets-live-in-one-file.md) — draft
+- [formatting-is-graded-by-line](patterns/formatting-is-graded-by-line.md) — draft

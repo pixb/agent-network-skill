@@ -1052,3 +1052,78 @@ Appended automatically by scripts/run_evals.py (and scripts/evolve.py) when a ch
 ]
 ```
 
+## 2026-11-09T05:54:52Z — run_evals --rollout FAILED
+
+- counts: passed=195, failed=13, errors=0, regressions=0, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-1",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-2",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-3",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-4",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-5",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-6",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-7",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-8",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-9",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-10",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-11",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-12",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  },
+  {
+    "case": "case-13",
+    "criterion": "guard-enforces-the-pointer-body-budget",
+    "status": "fail"
+  }
+]
+```
+

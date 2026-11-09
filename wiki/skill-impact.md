@@ -104,3 +104,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/budgets.json`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/budgets-live-in-one-file.md`
+
+## 2026-11-09T06:51:30Z — accepted
+
+- Proposal: `graded-markup-v075`
+- Target: `scripts/budgets.json`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/formatting-is-graded-by-line.md`
