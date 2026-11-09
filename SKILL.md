@@ -583,38 +583,18 @@ So the convention is **one network per project**, and a node alias carries machi
 no implicit network, so every read names one (`GET /api/messages?alias=admin&network_id=…`, and
 the hub answers `"network_id required (utok has no implicit network; pass ?network_id=<id>)"`).
 
-**Which channel to use, and where the message lands.** "Visible" below means *visible in the
-Dashboard*: the Tasks page reads `tasks` (with a `completions` fallback), the Messages page reads
-`inbox` via `?alias=<alias>`, and the inbox page `/messages/inbox` reads `user_inbox` via
-`?scope=user`. All three were measured on a throwaway hub (`evals/golden/case-9/10/11`), not
-inferred — the two reply tools land in **different** tables, and that is the single most common
-source of "我发了，Dash 上看不见".
+The channel table, the two facts that bite (`dm` is the only channel that reaches a person's unread
+count; `report_completion` is the only one invisible outside the Tasks page) and the measured case ids
+are in `references/manual-node.md` ("Where a message becomes visible"). The rule, in three lines:
 
-| you want to | use | lands in | Dashboard sees it? |
-|---|---|---|---|
-| hand over the finished work | `reply <task_id> … --via send_reply` | `inbox(session_name=<派单人用户名>)` + `tasks.result` | **yes** — Messages 页（case-11） |
-| finish and close the task only | `reply <task_id> …` (default = `report_completion`) | `completions` + `tasks.result` | Tasks 页只此一处 — Messages 页与收件箱都**看不见**，人也没有未读（case-10） |
-| ask the human a question mid-task | `state blocked` + `dm <username>` | `user_inbox(kind=agent_message)` | **yes** — `/messages/inbox`（case-9） |
-| chat with another node | `say <alias>` | `inbox(session_name=<node alias>)` | yes — Messages 页 |
-| chat with a human | `dm <username>` | `user_inbox` | yes — `/messages/inbox` |
+- **the answer is the deliverable** → `reply --via send_reply` (lands in the dispatcher's inbox, Messages page);
+- **a question mid-task** → `state blocked` + `dm <username>` (lands in `/messages/inbox`, task stays `running`);
+- **pure close-out** → `reply` without `--via send_reply` (nobody can read it outside the Tasks page).
 
-> **`dm` is the only channel that reaches a person's unread count; `report_completion` is the only
-> one that is invisible outside the Tasks page.** Both facts are the reason a control room can sit
-> for hours on a question nobody answered: `report_completion` writes no inbox row for the
-> dispatcher and no user_inbox row, so nothing anywhere shows the person that an answer arrived.
-> Use `--via send_reply` when the answer must be seen in the message stream, `dm` when a person
-> has to be *notified*.
-
-**`send_reply` is terminal.** It closes the task to `replied`, and `replied` is not in the set
-`retry_task` accepts (`failed` / `expired` / `cancelled`) — so asking a question as a reply ends
-the round, and the next round is a **new task**. Ask mid-task with `state blocked` + `dm` and keep
-the task `running`; answer with `reply` when the answer *is* the deliverable.
-
-A dashboard card that labels a manual node with the login username ("admin") is a **frontend
-fallback**, not a hub identity: `GET /api/status?alias=admin` returns no rows, `GET /api/nodes?alias=admin`
-returns `count: 0`, and every `nodes.owner_user_id` is null. Do not dispatch to that label; dispatch
-to the node's real alias.
-
+`send_reply` is **terminal**: it closes the task to `replied`, and `retry_task` accepts only
+`failed` / `expired` / `cancelled` — so asking a question as a reply ends the round. A dashboard card
+labelling a manual node with the login username is a **frontend fallback**, not a hub identity
+(`/api/status?alias=<user>` and `/api/nodes?alias=<user>` return nothing): dispatch to the node's real alias.
 ### 7.1 Two kinds of inbox row: tasks and chat
 
 `get_inbox` returns **inbox rows**, and there are two kinds, and they need different tools:
@@ -669,90 +649,35 @@ So a manual node that reads the inbox and then works without `working` spends th
 means `working` was skipped. The warning does not block the reply — the work really is done —
 but it is the only signal you get that the run was invisible.
 
+
 ### 7.3 What the hub should look like once you start
 
-Three independent facts have to line up; a heartbeat moves **none** of them.
+Three hub facts have to line up, and a heartbeat moves **none** of them: `tasks.status = running` with
+`started_at` set, `inbox.acked = 1`, and `sessions.status` / `sessions.task` — `working` writes all
+three. Read the verdict **per task**, never the session status: run
+`bash scripts/anet_manual_node.sh check`, which prints the node's single task slot separately from the
+open task rows. Two hub storage facts decide a manual node's behaviour — a node has **one task slot**
+(`sessions` is unique on `(network_id, alias)`: one status, one 200-character preview, so a second
+`report_status` overwrites the first task's text), and **"online" is not "working"** — a heartbeat with
+`sessions.status = idle` looks identical to a node whose task was taken away. `check` names the three ways
+that happens (reassigned away, expired/retried, `send_ack` by somebody else — that path updates the task
+by id **without an ownership check**), and `ack` / `working` refuse a task another node claimed.
 
-| hub fact | while you work | who writes it |
-|---|---|---|
-| `tasks.status` | `running`, with `started_at` set | `working` |
-| `inbox.acked` | `1` | `working` (it acks first) |
-| `sessions.status` / `sessions.task` | `working` + the body | `working` / the heartbeat |
-
-`check` prints the slot (the one task this node holds) separately from the queue (the open
-task rows), because they are different things — read the **verdict per task**, not the session
-status.
-
-**Two facts that decide how a manual node behaves** (both are hub storage
-semantics, not conventions):
-
-1. **A node has one task slot, not one per task.** `sessions` is unique on
-   `(network_id, alias)` and that row holds a single `status` and a single 200-char
-   task preview — a second `report_status` overwrites the first task's text. Real
-   runtimes queue the rest FIFO for the same reason. So a manual node works **one
-   task at a time**; the script refuses a second concurrent task rather than
-   letting the first vanish from the session view.
-2. **"Online" is not "working", and a task can leave you silently.** A heartbeat
-   plus `sessions.status = idle` looks exactly like a node doing nothing while its
-   task sits untouched — read the task row, never the session row. And three
-   things can take a task away: another node cannot `ack_inbox` it (a node token
-   only acks its own rows), but the planner can `reassign_task` it away, and
-   *anybody* can `send_ack` it — which updates the task by id **without checking
-   ownership**, so a task can be `acked` under a manual node that never acked it.
-   `check` names all three cases ("left behind", "ACKED BY SOMEONE ELSE"), and
-   `ack`/`working` refuse a task somebody else claimed, so two nodes never work
-   one task.
-
-When a task looks stuck, run `check` and read the verdict per task, not the
-session status:
-
-- **still `delivered`** — nobody acked it; the work never began (the hub's patrol
-  logs `task.warning.delivered_stale_30s` / `_60s` for the same condition)
-- **`acked` but not `running`** — the body was never reported byte-for-byte, *or*
-  somebody else acked it (the row is still in your inbox, so you never acked it)
-- **`running`** — genuinely in progress
-- **left behind** — it disappeared from your inbox (reassigned away, expired, or
-  retried)
-
-## Gotchas
-
-- **Dispatching without `ttl_seconds` promises one hour.** `send_task` defaults to
-  `ttl_seconds = 3600` (max 86400), and `retry_task` re-arms only `+1 hour` — so long work
-  needs the TTL written explicitly, and a retried long job is really a new task. Expired
-  tasks notify into `user_inbox` (`/messages/inbox`), never into the message stream.
-  See `references/ttl-and-expiry.md`.
-- **`report_completion` creates nothing a person can see as a message.** It writes
-  `completions` + `tasks.result` only — the Messages page and the inbox page both stay empty,
-  and the dispatcher gets no unread badge. That is the usual cause of "我发了，Dash 上看不见".
-  Use `--via send_reply` when the text must be read, `dm` when a person must be notified.
-
+The table, the stuck-verdict list and the patrol-log names:
+`references/manual-node.md` ("What the hub should look like once you start", "One command per round; the
+body you receive is a pointer").
 
 ### 7.4 One command per round; the body you receive is a pointer
 
-Each command in §7 moves **one transition**, so one command is one round (§1.1). `working` and
-`reply` read the hub around that transition (fetch the stored body, prove the status landed) — that
-is part of the same round, not extra calls. What is banned is chaining transitions: `inbox && ack &&
-working && reply` on one shell line is four transitions in one round — the node's single session slot
-gets overwritten, and if one of them fails you have four responses and no idea which transition the
-hub took. Run one command, read its verdict, run the next in the next round.
-
-The dispatched body is normally a 4-line pointer (`file:` / `seg:` / `sha12:`, §1.2). `working`
-fetches that body from the hub (never retype it), and the human works the **file**: run
-`bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
-file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
-on the revision you happen to have. `reply` carries a ≤1200-character `result` (line 1 is the
-conclusion) — what you ran to verify it, and the path of the long report, which goes into the payload
-file and gets committed.
-
-**`sha12` is the hash of whatever the pointer names.** With no `seg:` it is the **whole payload file**
-(v0.6.7 default: one task per file); with `seg:` it is **that segment's** block, not the file's.
-`verify` prints `sha12 : <value>  expected <value>` for the unit it was given, so run it the way the
-pointer is written — `--file <path> --sha12 <value>`, plus `--seg <id>` only when the pointer names a
-segment. A worker that reports “task says `X`, the committed file is really `Y`” has almost always
-hashed the whole file while the pointer named a segment — re-run `verify` with the segment name, quote
-its output line in `reply`, and treat a whole-file hash as a node-side calibration error, not as a
-planner-side conflict (2026-11-08, 0007 seg-02: task `dc58d929edb8`, worker reported the whole-file
-`fb9bc1fdbc62`; `verify --seg seg-02` exited 0 on `dc58d929edb8`).
+Each script command performs **one transition**, so one command is one round (§1.1) — `working` and
+`reply` read the hub around that transition as part of the same round. Chaining
+`inbox && ack && working && reply` on one shell line is four transitions in one round: banned. The body
+arrives as a pointer (§1.2) or a brief body (§1.2a) — **fetch it, never retype it**. Verify the payload
+file before working (`bash scripts/anet_payload.sh verify …`); a non-zero exit is a
+**conflict to report in `reply`**, not a licence to work on the revision you happen to have. `sha12` is
+the hash of **whatever the pointer names**: the whole file when there is no `seg:`, that segment's block
+when there is. The measured calibration case (a node hashing the whole file against a segment pointer)
+is in `references/manual-node.md`.
 
 ### 7.5 Two aliases, parallel dispatch, and timeout resend (operator order 2026-11-08)
 
@@ -784,6 +709,15 @@ resend — do not resend text that cannot be accepted.
 
 ## Gotchas
 
+- **Dispatching without `ttl_seconds` promises one hour.** `send_task` defaults to
+  `ttl_seconds = 3600` (max 86400), and `retry_task` re-arms only `+1 hour` — so long work
+  needs the TTL written explicitly, and a retried long job is really a new task. Expired
+  tasks notify into `user_inbox` (`/messages/inbox`), never into the message stream.
+  See `references/ttl-and-expiry.md`.
+- **`report_completion` creates nothing a person can see as a message.** It writes
+  `completions` + `tasks.result` only — the Messages page and the inbox page both stay empty,
+  and the dispatcher gets no unread badge. That is the usual cause of "我发了，Dash 上看不见".
+  Use `--via send_reply` when the text must be read, `dm` when a person must be notified.
 - **Planner**: one commhub call per round (§1.1) — stop after dispatching, no waiting, no polling, no
   second task in the same turn; ask first when a task is vague.
 - **Worker**: `get_inbox` → `ack` → `working` → `completion`, once per task; make `result` concrete
