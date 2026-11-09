@@ -41,3 +41,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-09T03:51:16Z — pattern added
 
 - `receiving-end-and-retryable-failure`
+
+## 2026-11-09T05:17:21Z — pattern added
+
+- `budgets-live-in-one-file`

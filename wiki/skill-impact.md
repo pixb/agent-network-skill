@@ -97,3 +97,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `SKILL.md`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/receiving-end-and-retryable-failure.md`
+
+## 2026-11-09T05:17:25Z — accepted
+
+- Proposal: `budgets-single-source-v073`
+- Target: `scripts/budgets.json`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/budgets-live-in-one-file.md`

@@ -927,3 +927,128 @@ Appended automatically by scripts/run_evals.py (and scripts/evolve.py) when a ch
 ]
 ```
 
+## 2026-11-09T04:45:36Z — run_evals --rollout FAILED
+
+- counts: passed=165, failed=11, errors=1, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-1",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-2",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-4",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-5",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-6",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-7",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-8",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-9",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-10",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-11",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-12",
+    "criterion": "<run>",
+    "status": "error"
+  },
+  {
+    "case": "case-13",
+    "criterion": "guard-refuses-markup-the-plain-surfaces-cannot-render",
+    "status": "fail"
+  },
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+
+## 2026-11-09T04:51:34Z — run_evals --rollout FAILED
+
+- counts: passed=192, failed=0, errors=1, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-12",
+    "criterion": "<run>",
+    "status": "error"
+  },
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+
+## 2026-11-09T04:57:42Z — run_evals --rollout FAILED
+
+- counts: passed=208, failed=0, errors=0, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+
+## 2026-11-09T04:59:02Z — run_evals --rollout FAILED
+
+- counts: passed=208, failed=0, errors=0, regressions=1, judge_failed=0
+- failing checks (raw):
+
+```json
+[
+  {
+    "case": "case-13",
+    "criterion": "<baseline>",
+    "status": "regression"
+  }
+]
+```
+

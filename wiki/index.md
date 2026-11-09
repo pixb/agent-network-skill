@@ -13,3 +13,4 @@ Evidence-linked draft patterns for skill maintenance. Do not load this file at r
 - [resend-body-carries-the-requirement-line](patterns/resend-body-carries-the-requirement-line.md) — draft
 - [brief-body-in-the-parameter](patterns/brief-body-in-the-parameter.md) — draft
 - [receiving-end-and-retryable-failure](patterns/receiving-end-and-retryable-failure.md) — draft
+- [budgets-live-in-one-file](patterns/budgets-live-in-one-file.md) — draft
