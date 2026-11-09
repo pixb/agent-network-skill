@@ -5,10 +5,12 @@
     "budgets-in-docs-match-the-script refuses a drift between them.",
     "Budgets are CHARACTERS (hub limits and the 200-char preview are character-counted too). Chinese is",
     "not cheaper: it costs about 1 token per character, and on the Dashboard's Latin-width UI a CJK",
-    "character renders full-width. Use `guard`'s cjk_share/est_tokens line to self-assess."
+    "character renders full-width. Use `guard`'s cjk_share/est_tokens line to self-assess.",
+    "task_max 800 (operator order 2026-11-09): the pointer budget is now wide enough to carry an item-by-item acceptance list, so a pointer body still points at a payload file (`file:` + `sha12:`) — the payload-file route is NOT replaced by the wider parameter, and the sha12 stays the proof of which revision the worker works on. Cost recorded, not hidden: the pointer enters the worker's context on every dispatch (800 characters ≈ 800 tokens, CJK ≈ 1 token/character), and the Dashboard's node card shows only a blind 200-character slice, so line 3+ is invisible there.",
+    "2026-11-09 (operator design note): a dispatch body is a formatted summary, not a wall of text — markdown from line 2 on, the detail in the payload file. task_lines_max is therefore 0 (no line cap) and markup is graded by line: line 1 plain, line 2+ markdown, tables refused everywhere."
   ],
-  "task_max": 480,
-  "task_lines_max": 8,
+  "task_max": 800,
+  "task_lines_max": 0,
   "brief_max": 1600,
   "result_max": 2400,
   "resend_max": 400,
@@ -33,11 +35,22 @@
     "pointer_body_worst_realistic": 242,
     "resend_body_with_uuid_and_4_accept_items": 248,
     "brief_body_flipped_to_running": 484,
-    "source": "docs/tests/report-skill-brief-body-20261109.txt (hub 192.168.1.3:9200, node n_9d315ae5)"
+    "source": "docs/tests/report-skill-brief-body-20261109.txt (hub 192.168.1.3:9200, node n_9d315ae5)",
+    "pointer_body_headroom_at_480": "480 - 271 = 209 spare chars; raised to 800 (2026-11-09, operator order) so a pointer can carry the whole requirement list inline while the steps stay in the payload file: 800 - 271 = 529 spare"
   },
   "hard_constraints": {
     "result_first_340_chars": "line 1 = the conclusion, lines 2-12 (the 300px the task pane shows before '展开全文 ⌄') = the evidence; the item-by-item acceptance list goes after them, and the long report goes in the payload file",
     "result_never_above": 4000,
     "ttl_rule": "ttl_seconds >= 2 * node idle budget (checked by compose --ttl/--node-idle; the hub does not check it: default 3600, max 86400)"
+  },
+  "markdown_policy": {
+    "line1": "plain text only, self-sufficient, <= line1_max characters: it is all the previews show",
+    "line2_plus": "markdown allowed (# headings, **bold**, '- ' bullets, '1.' numbering, > quotes, inline code) — the task pane renders it (react-markdown + remark-gfm)",
+    "refused_everywhere": [
+      "table rows (| … |)",
+      "fenced code blocks"
+    ],
+    "cost": "the Tasks detail page and Messages render plain text, so from line 2 the markup shows as its own characters there; that is the accepted price of a formatted dispatch body",
+    "source": "app/components/TaskChatPanel.tsx:492-493,561,1725,1769; app/components/TaskDetail.tsx:329,345; app/messages/page.tsx:443,488; app/nodes/NodesView.tsx:803,872,927; server/src/shared/task-content-limit.ts:20"
   }
 }

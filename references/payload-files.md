@@ -26,8 +26,8 @@ the repo, and the same pointer keeps working after `retry_task`.
 
 | argument | budget | hub ceiling (measured) |
 |---|---|---|
-| `send_task(task=…)` (pointer body) | ≤ 480 characters, ≤ 8 lines, line 1 ≤ 100 chars | 10 000 (`TASK_CONTENT_MAX`) |
-| `send_task(task=…)` (brief body, §1.2a) | ≤ 1600 characters, line 1 ≤ 100, `accept:` required, markdown-safe | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (pointer body) | ≤ 800 characters, **no line cap**, line 1 ≤ 100 **plain text** | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (brief body, §1.2a) | ≤ 1600 characters, line 1 ≤ 100 plain, `accept:` required, markdown from line 2 | 10 000 (`TASK_CONTENT_MAX`) |
 | `send_task(context=…)` | ≤ 400 characters, one line (project + branch + "in your working directory") | 10 000; **no Dashboard surface renders `context`** — its cost is only the worker's context (§1.2) |
 | `send_message` / `broadcast` / `send_reply` | ≤ 3000 characters, line 1 ≤ 100 | 10 000 (`send_reply` text) |
 | `report_completion(result=…)` | ≤ 2400 characters, line 1 ≤ 100 | accepts 50 000, **stores the first 4000** (`tools.ts:1592`, `:1605`) — 2400 keeps a full 1600-character margin |
@@ -62,12 +62,15 @@ What follows from that table:
 
 - **Line 1 must be self-sufficient**: list rows show only line 1, a card shows 2 lines, and the hub
   hands the card a blind slice with no notion of where a line ends.
-- **Use the markdown subset that also reads well as plain text**: a blank line between blocks,
+- **Line 1 stays plain, lines 2+ may be markdown.** The task pane renders markdown, so headings,
+  `**bold**`, `- ` bullets, `1.` numbering, `>` quotes and inline code read as structure there;
+  `guard` enforces exactly that (`line 1 carries …` is a refusal, the same markup from line 2 is not).
+- **Use the subset that also reads well as plain text where it matters**: a blank line between blocks,
   `- ` bullets, `key: value` fields (`verdict:` / `tests:` / `report:` / `commit:`).
-- **Never** tables (the task pane renders them, every plain surface shows `|---|`), `#` headings,
-  `**bold**`, backticks. The dashboard had to add a markdown component for comments precisely because
-  `## 归因更正`, `**错误**` and backticks were being shown **as their own characters**
-  (`app/components/CommentMarkdown.tsx`, issue #1831).
+- **Never** tables: the task pane renders them, every plain surface shows `|---|`. The dashboard had to
+  add a markdown component for comments precisely because `## 归因更正`, `**错误**` and backticks were
+  being shown **as their own characters** (`app/components/CommentMarkdown.tsx`, issue #1831) — that is
+  also why line 1, the only line the previews show, must stay plain.
 - **Delivery text ≤2400 characters; line 1 = the conclusion and lines 2–12 (the ≈340 characters the task pane shows before '展开全文 ⌄') = the evidence** — that is where the task pane
   collapses. The long report stays in a file.
 
@@ -121,7 +124,7 @@ named after the task**, not one file per round:
 
 Why a file per task, in measured terms: the worker `git pull`s and reads the file the pointer names.
 A file holding six tasks costs it six tasks' text on every run — five of them are tokens spent on
-somebody else's work — and a task body of ≤480 characters cannot tell it where to stop. One file per
+somebody else's work — and a task body of ≤800 characters cannot tell it where to stop. One file per
 task makes the read cost equal to the task. It also makes the fingerprint trivially unambiguous: the
 pointer names a file, and the hash is the file's.
 
@@ -140,6 +143,10 @@ Rules the tooling depends on:
 
 - **One file = one task** (SKILL.md §1, "one task, one deliverable").
 - **sha12 = first 12 hex of `sha256(file text)`** — trailing newlines dropped, LF newlines. It is the
+  Verify it with `anet_payload.sh verify --file <relpath> --sha12 <the one in your body>`, **never by hand**:
+  a `sha1sum` prefix and `git hash-object` are different functions — measured 2026-11-09 a worker
+  reported `sha12 50bf273c7813` as mismatched because it compared against `sha1sum` (`566e85ca4e4c`)
+  and the git blob (`cc757e1bf91c`); the pointer was right and `verify` confirms it in one call.
   revision fingerprint: it proves the worker is reading the revision the dispatcher meant.
 - `anet_payload.sh compose` with no `--seg` emits `file: …  sha12: <file hash>`; `verify` with no
   `--seg` compares the file hash.
@@ -317,9 +324,9 @@ and `compose` says so in the same breath ("…or deliver it as a hub attachment"
    `report_completion(result=…)`; do not work on a guess and do not widen the change.
 4. Work the file the pointer names. Write the deliverable and the long report where the task asks for
     it, commit, push.
-5. `report_completion` once, with a ≤2400-character `result` (line 1 = the conclusion): what you ran
-   to verify it, and the path of the long report. Format it with `- ` bullets and `key: value` fields —
-   no tables, headings, bold markers or backticks ("What renders where" below).
+5. `report_completion` once, with a ≤2400-character `result` (**line 1 plain = the conclusion**): what you ran
+   to verify it, and the path of the long report. From line 2 format it for the task pane — headings,
+   bold, `- ` bullets, `key: value` fields, inline code; **tables stay refused** ("What renders where" below).
 
 ## Failure modes
 

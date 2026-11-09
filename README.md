@@ -65,7 +65,7 @@ Two rules shape every call (SKILL.md §1.1, §1.2): **one commhub call per round
 that performs a single transition may read the hub around it — that is still one round), and **short
 parameters** — the long text lives in a payload file and the parameter carries only
 `file:` + `sha12:` (one task = one file; `seg:` only for a segment pointer). Budgets: dispatch body
-≤480, brief `task` ≤1600, delivered `result` ≤2400, message ≤3000, line 1 ≤100 — the hub accepts 10 000 / stores 4000, so
+≤800, brief `task` ≤1600, delivered `result` ≤2400, message ≤3000, line 1 ≤100 — the hub accepts 10 000 / stores 4000, so
 these are discipline, not limits:
 
 ```bash
@@ -94,7 +94,7 @@ ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-
 | [references/payload-files.md](references/payload-files.md) | Short parameters in depth: the budgets next to the hub's own ceilings, the one-file-per-task shape (and the `## seg-NN` segment format), the sha12, `compose` guards, the two handoff routes (git / hub attachment, with the 12 MiB · 20-file · 60-per-hour · 404-is-not-403 limits), what renders where in the Dashboard, failure modes |
 | [references/token-operations.md](references/token-operations.md) | Token operations: what idle-expires, how to identify a token, revocation, environment contamination, the 401 |
 | [scripts/anet_manual_node.sh](scripts/anet_manual_node.sh) | The manual-node operator: register, heartbeat, inbox, ack, working, reply, check, files, fetch |
-| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `sha12:`, one task per file), `verify` it on the worker side, `guard` an existing body (`--kind result` enforces the delivery budget and refuses markup the plain-text surfaces cannot render), `list` the file's segments, `upload` the file through the hub (prints file_id + sha12 + the pointer line) |
+| [scripts/anet_payload.sh](scripts/anet_payload.sh) | Short-parameter discipline made mechanical: `compose` a pointer body (`file:` + `sha12:`, one task per file), `verify` it on the worker side, `guard` an existing body (`--kind task|brief|result|resend` enforces the budget and the graded markup rule: line 1 plain, markdown from line 2, tables refused), `list` the file's segments, `upload` the file through the hub (prints file_id + sha12 + the pointer line) |
 | [scripts/run_evals.py](scripts/run_evals.py) | Eval runner — `python3 scripts/run_evals.py` |
 | [evals/](evals/) | Eval spec and golden cases; they boot throwaway hubs and drive real tasks |
 | [AGENTS.md](AGENTS.md) | Directory-level notes: purpose, triggers, contents, Gotchas |

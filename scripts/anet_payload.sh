@@ -306,7 +306,7 @@ lines = body.split("\n")
 violations = []
 if len(body) > max_chars:
     violations.append(f"the body is {len(body)} chars (budget {max_chars}) — the long text belongs in the file, not in the parameter")
-if len(lines) > lines_max and kind in ("task", "resend"):
+if lines_max and len(lines) > lines_max and kind in ("task", "resend"):
     violations.append(f"the body is {len(lines)} lines (budget {lines_max})")
 # A body that names an existing task is a RESCHEDULE: it is the text the operator will accept against,
 # so it must carry a requirement line. Trigger: a task id quoted in the body (hub ids are uuid4, which
@@ -330,22 +330,36 @@ if lines and len(lines[0]) > max_first:
 if '```' in body:
     violations.append("the body contains a code block — code belongs in the payload file")
 if not allow_markup:
-    # Measured on the Dashboard: the node card (NodesView.tsx line-clamp-2), the node list rows
-    # (truncate), the Tasks detail (TaskDetail.tsx, whitespace-pre-wrap) and the Messages page all
-    # render PLAIN text; only the task pane (TaskChatPanel, react-markdown) renders markdown. So a
-    # table/heading/bold/backtick is paid for by four plain surfaces, where it shows as its own
-    # characters. The subset that reads well everywhere: blank lines, `- ` bullets, `key: value`.
+    # Graded by what each surface can actually show (measured 2026-11-09 on the Dashboard):
+    #   · line 1 is what every preview shows: sessions.task keeps the first 200 characters cut
+    #     blindly, the node card clamps at 2 lines (NodesView.tsx line-clamp-2), the node list rows
+    #     truncate to 1 line — so line 1 must be plain, self-sufficient text.
+    #   · lines 2+ are read in the task pane, which renders markdown (TaskChatPanel.tsx:492-493,
+    #     :561, :1725, :1769 = react-markdown + remark-gfm) — headings, bold, bullets, numbering,
+    #     quotes and inline code are allowed there.
+    #   · tables are refused at every line: the Tasks detail (TaskDetail.tsx:329,345) and Messages
+    #     (app/messages/page.tsx:443,488) render plain text and a table is the shape that shatters
+    #     worst there.
+    first = lines[0] if lines else ""
+    if re.search(r"(?m)^\s*\|.*\|\s*$", body):
+        violations.append(
+            "the text carries a table row (`| … |`): the Tasks detail and the Messages page render "
+            "plain text and a table is the shape that shatters worst — use blank lines, `- ` bullets "
+            "and `key: value` fields (tables are refused at every line, not only on line 1)"
+        )
     for pattern, label in [
-        (r"(?m)^\s*\|.*\|\s*$", "a table row (`| … |`)"),
-        (r"(?m)^\s*#{1,6}\s", "a `#` heading"),
+        (r"^\s*#{1,6}\s", "a `#` heading"),
+        (r"^\s*[-*•] ", "a bullet"),
+        (r"^\s*>", "a block quote"),
         (r"\*\*[^*]+\*\*", "`**bold**` markup"),
         (r"`[^`]+`", "backticks"),
     ]:
-        if re.search(pattern, body):
+        if re.search(pattern, first):
             violations.append(
-                f"the text carries {label}: the node card, node list rows, the Tasks detail and the "
-                "Messages page render plain text, so it appears there as its own characters — use "
-                "blank lines, `- ` bullets and `key: value` fields"
+                f"line 1 carries {label}: line 1 is the only part the previews show (`sessions.task` "
+                "keeps the first 200 characters cut blindly, the node card clamps at 2 lines, the node "
+                "list rows truncate) and those surfaces render plain text — write line 1 as a plain "
+                "self-sufficient sentence and put the markup from line 2 on"
             )
 # Token classification, not a pattern that can catch the tail of a URL: a path counts
 # when a whitespace-separated token — punctuation stripped — starts with `/` (POSIX

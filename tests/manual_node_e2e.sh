@@ -309,6 +309,64 @@ STORED=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK6?network
 [ "$STORED" = "$BRIEF" ] || { echo "the hub stored a body that is not the one composed"; exit 1; }
 echo "   brief body round-tripped byte-exactly: acked -> running -> replied"
 
+echo "== a formatted dispatch body: plain line 1, markdown from line 2, no line cap (§1.2)"
+MD="e2e 分级 markdown 指针：验收规则与预算
+purpose: line 1 是纯文本，它是预览唯一显示的那一行
+
+## 步骤
+1. **读** budgets.json 取四个值
+2. 跑 \`guard\` 的边界命令，记录退出码
+
+## 验收
+- A1 四个值逐条列出
+- A2 与 SKILL.md 表格逐项相同？
+- A3 边界退出码：800→0，801→非0
+
+> 只读：不改文件，不提交
+accept: A1..A3 逐条给实测数值
+report_completion once, result <= 2400 chars, line 1 is the conclusion"
+MD_LINES=$(printf '%s' "$MD" | python3 -c 'import sys;print(len(sys.stdin.read().split(chr(10))))')
+"$SKILL_DIR/scripts/anet_payload.sh" guard --body "$MD" --kind task >/dev/null \
+  || { echo "guard refused a formatted body whose line 1 is plain ($MD_LINES lines)"; exit 1; }
+# line 1 is the guarded line: the same markup there must be refused
+if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "**e2e**：line 1 带加粗
+accept: 每项实测" --kind task >/dev/null 2>&1; then
+  echo "guard accepted markup on line 1 (the previews render plain text there)"; exit 1
+fi
+if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$MD
+| a | b |
+|---|---|" --kind task >/dev/null 2>&1; then
+  echo "guard accepted a table row (refused at every line)"; exit 1
+fi
+# and a pointer body has no line cap: 25 lines inside the character budget must pass
+MANY="e2e 多行指针：验证 task_lines_max = 0
+accept: 每条都实测
+$(python3 -c 'print(chr(10).join("- 第 %d 条：实测数值" % i for i in range(1,25)))')"
+MANY_LINES=$(printf '%s' "$MANY" | python3 -c 'import sys;print(len(sys.stdin.read().split(chr(10))))')
+"$SKILL_DIR/scripts/anet_payload.sh" guard --body "$MANY" --kind task >/dev/null \
+  || { echo "guard applied a line cap ($MANY_LINES lines refused) though task_lines_max is 0"; exit 1; }
+echo "   formatted body ($MD_LINES lines) accepted; markup on line 1 refused; table refused; $MANY_LINES lines accepted (no cap)"
+TASK7=$(python3 - "$HUB" "$UTOK" "$NET" "$MD" <<'PY'
+import json, sys, urllib.request
+hub, utok, net, body = sys.argv[1:5]
+req = urllib.request.Request(
+    hub + "/api/task", method="POST",
+    headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
+    data=json.dumps({"alias": "e2e-manual-node", "task": body, "network_id": net, "ttl_seconds": 3600}).encode())
+print(json.load(urllib.request.urlopen(req))["task_id"])
+PY
+)
+echo "   dispatched formatted task $TASK7"
+run ack "$TASK7" >/dev/null
+run working "$TASK7" >/dev/null
+[ "$(task_status "$TASK7")" = "running" ] || { echo "the formatted body did not flip the task to running (the byte-exact echo is what makes this work)"; exit 1; }
+run reply "$TASK7" "A1 task_max 800, brief_max 1600, result_max 2400, line1_max 100; A2 逐项相同; A3 800 exit 0, 801 exit 2" >/dev/null
+[ "$(task_status "$TASK7")" = "replied" ] || { echo "expected replied"; exit 1; }
+STORED7=$(curl -s -H "Authorization: Bearer $UTOK" "$HUB/api/tasks/$TASK7?network_id=$NET" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['task']['content'])")
+[ "$STORED7" = "$MD" ] || { echo "the hub stored a body that is not the formatted one"; exit 1; }
+echo "   formatted body ($MD_LINES lines, markdown blocks) round-tripped byte-exactly: acked -> running -> replied"
+
 echo "== one file per task: the pointer names a FILE, so its sha12 is the FILE's hash"
 FILE_TASK="commhub_tasks/e2e/export-tests.md"
 cat > "$PROJ/$FILE_TASK" <<'EOF'

@@ -224,10 +224,14 @@ copies them, and the criterion `budgets-in-docs-match-the-script` refuses a drif
 place: the file. Measured bodies (the templates in `scripts/budgets.json`, measured on a live hub in
 `docs/tests/report-skill-brief-body-20261109.txt`): a 4-line Chinese pointer (path + seg + sha12 + branch
 + acceptance) is **213** characters, the worst realistic one with an extra context line is **271**, and a
-resend body quoting a task id plus four Chinese acceptance items is **248**. So the pointer budget is
-**480**: 209 spare characters over the worst real body, and the spare is deliberate — the node card shows
-a blind 200-character slice, so everything past line 2 is invisible *there* and is paid for in the
-worker's context on every dispatch. Character budgets are what the hub counts too, so Chinese is not
+resend body quoting a task id plus four Chinese acceptance items is **248**. The pointer budget is
+**800** (529 spare over the worst real body; raised from 360 → 480 → 800 on 2026-11-09 so the pointer can
+carry an item-by-item requirement list inline while the steps stay in the payload file). A live dispatch
+measured **768** characters (`08f07073-0f61-4b6c-8fc2-1760a0c2dba8`, node `3-agent-network-pi`):
+`delivered 05:54:35 → running 05:54:36 → replied 06:00:57`, so the byte-exact `working` flip survives a
+long pointer. The spare is paid for, not free: the node card shows a blind 200-character slice, so
+everything past line 2 is invisible *there*, and the whole body enters the worker's context on every
+dispatch (768 characters ≈ 322 estimated tokens at 23% CJK, printed by `guard`). Character budgets are what the hub counts too, so Chinese is not
 cheaper: it costs about 1 token per character and renders full-width on the Dashboard (`guard` prints
 `cjk` share and `est_tokens` so you can see the price before you dispatch).
 
@@ -237,8 +241,8 @@ of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, 
 
 | argument | budget | why this number |
 |---|---|---|
-| `task` (pointer body at a payload file) | ≤ 480 chars, ≤ 8 lines, line 1 ≤ 100 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
-| `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1600 chars, line 1 ≤ 100, **`accept:` required**, markdown-safe | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
+| `task` (pointer body at a payload file) | ≤ 800 chars, **no line cap**, line 1 ≤ 100 **plain text** | the dispatch body is a formatted summary (markdown from line 2), the detail is the payload file. `report_status(working)` echoes it byte-for-byte (measured on a live hub: a 768-character body went `delivered → running → replied`), and the previews show only line 1, so line 1 carries the meaning |
+| `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1600 chars, line 1 ≤ 100 **plain text**, **`accept:` required**, markdown from line 2 | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
 | `report_completion` `result` | ≤ 2400 chars, line 1 ≤ 100 | the hub stores the **first 4000** (`tools.ts:1592`, `:1605`) — 2400 stays clear of that cliff. The task pane collapses at ≈12 lines **behind '展开全文 ⌄'** (`TaskChatPanel.tsx:601`, `:634`), so lines past 12 are one click away, not lost: line 1 = the conclusion, lines 2–12 = the evidence, the item-by-item acceptance list after them, the long report in the payload file |
 | `send_message` / `broadcast` / `send_reply` | ≤ 3000 chars, line 1 ≤ 100 | list views show line 1 only |
 | resend body (quotes an existing `task_id`) | ≤ 400 chars, line 1 ≤ 100, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes (§7.5) |
@@ -246,12 +250,19 @@ of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, 
 
 Never a pasted spec, a code block, a log, a diff, a table, a file's content, or an absolute path.
 
-**Formatting is a hard rule, not a taste.** Read `references/payload-files.md` ("What renders
-where") for the measured per-surface table: the node's **task pane renders markdown**, while the **node card, node list
-rows, the Tasks page and the Messages page render plain text**. Use the subset that reads well in
-both — line 1 = a self-sufficient summary, a blank line between blocks, `- ` bullets, `key: value`
-fields (`verdict:` / `tests:` / `report:` / `commit:`). Do not use tables, `#` headings, `**bold**` or
-backticks: in the plain-text surfaces those appear as their own characters.
+**Formatting is a hard rule, graded by line.** Read `references/payload-files.md` ("What renders
+where") for the measured per-surface table. The rule follows what each surface can show:
+
+- **line 1 = plain text, self-sufficient, ≤100 characters.** It is all the previews show
+  (`sessions.task` keeps the first 200 characters cut blindly, the node card clamps at 2 lines, the node
+  list rows truncate to 1) and every one of those surfaces renders plain text.
+- **lines 2+ = markdown allowed**: `#` headings, `**bold**`, `- ` bullets, `1.` numbering, `>` quotes,
+  inline code, blank-line blocks. The node's **task pane renders markdown**
+  (`TaskChatPanel.tsx:492-493`, `:561`, `:1725`, `:1769` = `react-markdown` + `remark-gfm`), so a
+  formatted body reads as structure there. The price is named, not hidden: the Tasks detail page and
+  Messages render plain text, so from line 2 the markup shows as its own characters **there**.
+- **tables are refused at every line** (the plain surfaces show a table as its own characters and it
+  shatters worst), as are fenced code blocks. `--allow-markup` is the explicit opt-out of the whole rule.
 
 Long text lives in a **payload file in your working tree** — **one file per task**, named after the
 task: `commhub_tasks/<round>/<task-slug>.md`. The body is a 4-line pointer at that file:
@@ -272,17 +283,18 @@ file per task makes the read cost equal to the task.
 there is no `seg:`, **the segment** when there is. Build the body mechanically — run
 `bash scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md --summary
 "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
-and refuses a >100-character summary, a >480-character body, a >8-line body, a code block, an absolute
+and refuses a >100-character summary, a >800-character body, a >8-line body, a code block, an absolute
 path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
 uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
 `bash scripts/anet_payload.sh verify --file … --sha12 …` first (`--seg …` for a segment pointer); a
 non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never work
 on a guess. Auditing a body you already have (a hub row, a draft) is
 `bash scripts/anet_payload.sh guard --body "…" --kind task|brief|result|resend`, the same rule from the
-same place. It reads the budgets from `scripts/budgets.json`, refuses markup **by default**
-(`--allow-markup` is the opt-out), checks the layout subset on the formatted bodies (`--layout` asks for
-it everywhere: line length ≤120, `- ` bullets, ASCII `key: value`), prints the CJK share and an estimated
-token cost, and `compose --ttl <seconds> --node-idle <seconds>` refuses a TTL below 2 × the node's idle
+same place. It reads the budgets from `scripts/budgets.json`, enforces the **graded markup rule**
+(line 1 plain, lines 2+ markdown, tables refused everywhere; `--allow-markup` is the opt-out), has **no
+line cap for a pointer body** (`task_lines_max: 0`), checks the layout subset on the formatted bodies
+(`--layout` asks for it everywhere: line length ≤120, `- ` bullets, ASCII `key: value`), prints the CJK
+share and an estimated token cost, and `compose --ttl <seconds> --node-idle <seconds>` refuses a TTL below 2 × the node's idle
 budget — the hub does not check that (default 3600, max 86400), and a short TTL is how a task dies in the
 sweep while the node sits idle.
 
@@ -315,8 +327,9 @@ report_completion once, result <= 2400 chars, line 1 is the conclusion
 ```
 
 Audited mechanically: `bash scripts/anet_payload.sh guard --body "…" --kind brief` — ≤1600 characters,
-line 1 ≤100, the `accept:` block present, and markup the plain-text surfaces cannot render (tables, `#`
-headings, bold markers, backticks) refused.
+line 1 ≤100 plain (no markup on the line the previews show), the `accept:` block present, and the graded
+markup rule applied: `#` headings, bold, bullets, numbering, quotes and inline code are accepted from
+line 2 on, tables and fenced code blocks are refused at every line.
 
 **Pick the shape by what the work needs**, not by taste:
 
@@ -345,7 +358,7 @@ modes.
 - **TTL**: default 3600s for anything verified within the round; give 86400s explicitly for work
   that runs across hours or overnight, and keep `ttl_seconds ≥ 2 × the node's idle budget` — read
   `references/ttl-and-expiry.md` before shortening one.
-- **The body is a pointer, not the spec** (§1.2): ≤ 480 characters, ≤ 8 lines, with `file:` / `seg:` /
+- **The body is a pointer, not the spec** (§1.2): ≤ 800 characters, no line cap, with `file:` / `seg:` /
   `sha12:` carrying the real content. A paste or code block in a parameter is the most reliable way to
   stall a task.
 - **One commhub call per round** (§1.1): the dispatch *is* the round; N tasks = N rounds.
@@ -393,8 +406,9 @@ calls in it. Between them you do local work (read files, run the tests), which c
    characters>, artifacts=[<URL or file path>])`. You may also pass `score` (self-assessed 0-10).
    `result` is ≤2400 characters, line 1 a one-sentence conclusion: what changed, how it was verified,
    and the path of the long report — the long report goes in the file (in the segment's 产出 section),
-   not in the parameter. Format it for the task pane: `- ` bullets and `key: value` fields, no tables,
-   headings, bold markers or backticks (§1.2, "Formatting is a hard rule").
+   not in the parameter. Format it for the task pane (§1.2, "Formatting is a hard rule, graded by
+   line"): line 1 plain (it is all the previews show), then headings / bold / `- ` bullets / numbering /
+   inline code as needed — the task pane renders markdown. Tables stay refused.
    Merging several tasks into one report = none of them take effect.
    **`report_completion` is invisible to a person.** It writes `completions` + `tasks.result` only —
    no `inbox` row for the dispatcher, no `user_inbox` row, no unread badge; the Tasks page is the only
@@ -455,7 +469,7 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
 - **One commhub call per round** (§1.1). A turn that fires several commhub calls leaves you with no
   way to tell which transition the hub accepted, and a batch of `report_completion` calls on one node
   overwrites the single session slot. Local calls (files, git, bash) are unlimited.
-- **Keep the body short** (§1.2, ≤480 characters). The body is echoed back byte-for-byte by the
+- **Keep the body short** (§1.2, ≤800 characters). The body is echoed back byte-for-byte by the
   worker in `report_status`, so every paragraph you paste into the parameter multiplies the chance of
   a drift that stalls the task in `acked`. Long text goes in a payload file — **one file per task**, so
   the worker never reads a neighbour's spec; the parameter carries `file:` + `sha12:` (and `seg:` only
