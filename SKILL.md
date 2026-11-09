@@ -139,7 +139,7 @@ The tool set is whatever the running hub returns from `tools/list`.
 ## 1. Role A: planner (control room)
 
 Tools: `send_task` `get_task` `list_tasks` `cancel_task` `retry_task` `reassign_task`
-`get_all_status` `broadcast` `send_message` (the pool path is in §6).
+`get_all_status` `broadcast` `send_message` **`get_inbox` `ack_inbox`** (the pool path is in §6).
 
 **The control room is a user account, and it does not need a node.** Dispatch runs on a user
 token, so every task row carries `from_name = <your username>`; a user token is refused by
@@ -164,13 +164,24 @@ with a dashboard is not that. See §7.0 for the channels and where each one land
    - **Stop after dispatching**: the round ends with the dispatch. Don't also poll, don't also check
      status, don't also dispatch the next task — the recipient is an asynchronous AI; wait for its
      own completion signal (`report_completion` / a terminal `get_task` in a later round).
-4. **Verify** (one call per round, §1.1):
+4. **Read what comes back to you** (one call per round, §1.1). An answer delivered with `send_reply` is
+   a **message in your own inbox**, not a completion: it writes `inbox(session_name=<your username>)`, and
+   a user token may read the inbox carrying its own name (`resolveInboxCaller`, `user?.username ===
+   requested`, `server/src/inbox-caller.ts:38`; a network owner/admin may read any alias in that network,
+   `:43`). So:
+   - `get_inbox(alias=<your own username>)` — the answers and the mid-task questions live here. The REST
+     equivalent is `GET /api/messages?alias=<your username>&network_id=<net>` (a utok has no implicit
+     network), and that is also the row the Dashboard Messages page shows.
+   - `ack_inbox(message_id)` in a later round, so the row stops sitting in your queue.
+   - `report_completion` writes **no** row in your inbox (§7.0): a worker that only closes the task is
+     silent in the message stream. When the answer must be read, **name the delivery channel in the body**.
+5. **Verify** (one call per round, §1.1):
    - `get_task(task_id)` in one round; `list_tasks(alias=<worker-alias>)` in another.
    - `get_all_status` for global busy/idle — its own round.
    - `get_completions(alias=<worker-alias>)` for the actual output and the self-score (0-10).
    - Verification is read-only: don't touch the other side's directories or state; whether tasks
      from this round are left for you to dispose of is the operator's call.
-5. **Ask when unsure**: vague scope, or anything touching interfaces / deleting data / production —
+6. **Ask when unsure**: vague scope, or anything touching interfaces / deleting data / production —
    ask the operator first; don't decide for them.
 
 ### 1.1 One commhub call per round (hard rule)
@@ -332,7 +343,7 @@ modes.
 
 ## 2. Role B: worker (executor)
 
-Tools: `get_inbox` `ack_inbox` `report_status` `report_completion`.
+Tools: `get_inbox` `ack_inbox` `report_status` `report_completion` `send_reply`.
 
 **One commhub call per round (§1.1):** the steps below are one call each, so they are one round
 each. Reading the hub, acking, starting, and reporting are four rounds, not one turn with four
@@ -369,13 +380,20 @@ calls in it. Between them you do local work (read files, run the tests), which c
    Merging several tasks into one report = none of them take effect.
    **`report_completion` is invisible to a person.** It writes `completions` + `tasks.result` only —
    no `inbox` row for the dispatcher, no `user_inbox` row, no unread badge; the Tasks page is the only
-   place it shows. Have the dispatcher **read** the result with `send_reply` (manual node: `reply …
-   --via send_reply`), which is **terminal** — `replied` is not retryable, so never ask a question that
-   way. Notify a **person** mid-task with `report_status(status="blocked")` + `send_desktop_message`
+   place it shows. Deliver the same text so the dispatcher can **read** it — `send_reply(
+   in_reply_to=<task_id>, text=<the same conclusion>)` (manual node: `reply … --via send_reply`), which
+   is **terminal** — `replied` is not retryable, so never ask a question that way. Notify a **person** mid-task with `report_status(status="blocked")` + `send_desktop_message`
    (manual node: `dm`) and keep the task `running`. Channel table: §7.0 — cite it, do not copy it.
-7. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
+7. **If the work cannot be done, land it as `failed` — not as a completion.** `report_completion` always
+   writes `status = 'replied'` (`server/src/tools.ts:1593`, `:1606`), and `retry_task` accepts only
+   `failed` / `expired` / `cancelled` (`server/src/tools.ts:3038`) — so a failure reported through
+   `report_completion` is **not retryable and is counted as an arrival**. The path is `send_reply(
+   in_reply_to=<task_id>, text=<what you ran, what failed, why>, status="failed")` (the status is an
+   enum `replied|failed|cancelled`, `tools.ts:2487`). Manual node: `reply <task_id> "<text>" failed` —
+   the script routes every non-`replied` outcome through `send_reply` (`scripts/anet_manual_node.sh:801`).
+8. **Finish**: `report_status(alias=<self>, status="idle", task=null)` (a completion also sets the
    session to idle).
-8. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
+9. **Stuck? Fix it**: see §3 and Gotchas — **don't re-send** (the dedupe layer rejects it), and don't
    change status without reporting.
 
 **Worker discipline**:
@@ -408,7 +426,8 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
 | created → delivered | `send_task` | Delivered immediately when online; offline returns 202 (queued) and is delivered on reconnect |
 | delivered → acked | `ack_inbox(message_id=task_id)` | Only fires from delivered |
 | delivered/acked → running | `report_status(status="working", task=<body>)` | **`task` must match the body character-for-character**; exact-equality on the body only, **no task_id branch** |
-| any non-terminal → replied | `report_completion(task=<body>)` | Tries `task_id` first; on a miss, exact-equality on `to_name=alias AND content=<body>` |
+| any non-terminal → replied | `report_completion(task=<body>)` | Tries `task_id` first; on a miss, exact-equality on `to_name=alias AND content=<body>`. **Always writes `replied`** (`tools.ts:1593`, `:1606`) |
+| any non-terminal → failed | `send_reply(in_reply_to=<task_id>, text=…, status="failed")` | The only worker-side path into `failed` (`status` enum, `tools.ts:2487`); a failure closed via `report_completion` is `replied` and cannot be retried (§2 step 7) |
 | any → cancelled | `cancel_task` | Planner/operator |
 | timeout → expired | hub timer | TTL default 3600s, max 86400s |
 | failed / expired / cancelled → retryable | `retry_task` | Always adds +1h TTL; `task_id` is unchanged, the inbox gets a new message id |
@@ -679,7 +698,7 @@ the hash of **whatever the pointer names**: the whole file when there is no `seg
 when there is. The measured calibration case (a node hashing the whole file against a segment pointer)
 is in `references/manual-node.md`.
 
-### 7.5 Two aliases, parallel dispatch, and timeout resend (operator order 2026-11-08)
+### 7.5 Two aliases, parallel dispatch, and timeout resend
 
 **An alias is not a node.** Read the `alias → node_id` mapping from `GET /api/status` (or from
 `send_task`'s `actual_to.to_node_id`) before you treat two aliases as two workers. Manual nodes often
@@ -688,24 +707,55 @@ machine or two separate nodes. Parallel dispatch is real **only when the `node_i
 node the second task overwrites the first in the session row (§Gotchas, "a node has ONE task slot").
 
 When the operator grants parallel dispatch, apply it as **one task per alias, never the same segment
-to both aliases**: two deliveries of one segment produce two competing `sha12` for one file and the
-ledger cannot record both. Pick two different segments, dispatch one to each, and record both task ids.
+to both aliases**: two deliveries of one segment produce two competing `sha12` for one file, and no
+log can record both as the arrival. Pick two different segments, dispatch one to each, and record both
+task ids.
 
 **Timeout = `expired` with an empty `result` and no arrival.** Read the task row, not the session row:
 a row with `status: expired`, a non-empty `completed_at` and an empty `result`, plus no commit in the
 target repo, is a **timed-out task, not a delivery**. Resend it as a **new task** with the same pointer
-(`file:` / `seg:` / `sha12:` unchanged, fresh ttl), and record in the ledger
-`expired_task_ids: [<old id>]` next to the new dispatch id. Never accept, grade, or count an
+(`file:` / `seg:` / `sha12:` unchanged, fresh ttl), and record **both ids** — the expired one and the
+new one — in your project's **dispatch log** (the project document where each round's task ids, verdicts
+and deliveries are recorded; the field names are the project's business, the protocol only requires that
+both ids are written down, e.g. `expired_task_ids: [<old id>]` beside the new dispatch id). Never accept, grade, or count an
 `expired` row as an arrival, and keep the original payload file as the single source of the spec.
 
 **A resend body must carry the requirement line, and it names the old task id.** Quoting the expired
-`task_id` is what keeps the ledger straight (`expired_task_ids`), and quoting it costs 36 characters —
+`task_id` is what makes the dispatch log auditable (which round was a resend), and quoting it costs 36
+characters —
 so a resend body is audited at **≤340**, and `accept:` is mandatory in it. Measured 2026-11-09: a
 timeout resend was dispatched as `resend <seg>: task <uuid> expired, work it again` with no acceptance
 line, and acceptance had to be argued in prose afterwards. `bash scripts/anet_payload.sh guard
 --kind resend` refuses exactly that body and accepts the same body with the `accept:` line added; if
 the task you are resending never had a requirement line, **add one to the payload file first**, then
 resend — do not resend text that cannot be accepted.
+
+### 7.6 A delivery must name the revision fingerprints it used
+
+A worker's machine has its own history: the branch it pulled, the file it read, the prompt, config or
+seed it ran with. A delivery that only says "done" proves nothing about **which revision** produced
+the result — and a node that quietly keeps using a stale local copy delivers work that never matched
+the dispatch. The measured shape of that failure (one project round, 2026-11-08): two deliveries that
+looked excellent in shape and numbers, both produced by an **older local revision** of the input text;
+only a fingerprint comparison in the log showed it, and both were rejected.
+
+The rule, both sides:
+
+- **Dispatch** names the fingerprint of every input the worker must use — `<input-name>=<sha12>` per
+  input, plus the branch — in the payload file's acceptance list, not in the task body (the body stays
+  the short pointer, §1.2).
+- **Delivery reports the fingerprints it actually used**, in the same notation, plus the commit:
+  `raw=<sha12>  file=<path>  sha12=<pointer sha12>  commit=<hash>`. A delivery missing them is
+  incomplete, not "fast".
+- **Stop on mismatch**: after `git pull`, recompute before doing the work. If the local value differs
+  from the dispatched one, do not work — report `fingerprint mismatch: local <x> != dispatched <y>` in
+  `result` and let the dispatcher decide (§2 step 3: a conflict is reported, never worked around).
+- Re-running identical inputs and getting a different output (a model, a renderer, a random seed) is
+  **not** reproducibility evidence. Say which parts are non-deterministic.
+
+Project vocabularies of this rule — an image round's prompt file, a seed, a ledger column, a named
+sibling skill — belong in that project's own documents, not in this protocol.
+
 
 ## Gotchas
 
@@ -766,29 +816,3 @@ resend — do not resend text that cannot be accepted.
   or the segment sha12 does not match. `bash scripts/anet_payload.sh compose` refuses to build such a body, and
   `verify` refuses to work from it; the worker reports the conflict in `result` (never works on a
   guess). Push the branch, or ship it as a hub attachment with its `file_id` (§4).
-
-### 7.6 A delivery must name the revision fingerprints it used
-
-A worker's machine has its own history: the branch it pulled, the file it read, the prompt, config or
-seed it ran with. A delivery that only says "done" proves nothing about **which revision** produced
-the result — and a node that quietly keeps using a stale local copy delivers work that never matched
-the dispatch. The measured shape of that failure (one project round, 2026-11-08): two deliveries that
-looked excellent in shape and numbers, both produced by an **older local revision** of the input text;
-only a fingerprint comparison in the log showed it, and both were rejected.
-
-The rule, both sides:
-
-- **Dispatch** names the fingerprint of every input the worker must use — `<input-name>=<sha12>` per
-  input, plus the branch — in the payload file's acceptance list, not in the task body (the body stays
-  the short pointer, §1.2).
-- **Delivery reports the fingerprints it actually used**, in the same notation, plus the commit:
-  `raw=<sha12>  file=<path>  sha12=<pointer sha12>  commit=<hash>`. A delivery missing them is
-  incomplete, not "fast".
-- **Stop on mismatch**: after `git pull`, recompute before doing the work. If the local value differs
-  from the dispatched one, do not work — report `fingerprint mismatch: local <x> != dispatched <y>` in
-  `result` and let the dispatcher decide (§2 step 3: a conflict is reported, never worked around).
-- Re-running identical inputs and getting a different output (a model, a renderer, a random seed) is
-  **not** reproducibility evidence. Say which parts are non-deterministic.
-
-Project vocabularies of this rule — an image round's prompt file, a seed, a ledger column, a named
-sibling skill — belong in that project's own documents, not in this protocol.
