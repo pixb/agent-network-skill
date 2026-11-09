@@ -90,3 +90,10 @@ entry must not cite evidence that does not contain the run it describes.
 - Target: `scripts/anet_payload.sh`
 - Held-out validation score: `1.0000`
 - Pattern: `wiki/patterns/brief-body-in-the-parameter.md`
+
+## 2026-11-09T03:51:16Z — accepted
+
+- Proposal: `audit-receiving-end-v072`
+- Target: `SKILL.md`
+- Held-out validation score: `1.0000`
+- Pattern: `wiki/patterns/receiving-end-and-retryable-failure.md`

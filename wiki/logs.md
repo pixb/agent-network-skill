@@ -37,3 +37,7 @@ Append-only record of pattern maintenance.
 ## 2026-11-08T18:38:07Z — pattern added
 
 - `brief-body-in-the-parameter`
+
+## 2026-11-09T03:51:16Z — pattern added
+
+- `receiving-end-and-retryable-failure`
