@@ -20,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.7.4
+  version: 0.7.5
   created: 2026-10-07
   last_reviewed: 2026-11-09
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.7.4
+  version: 0.7.5
   created: 2026-10-07
 ---
 
