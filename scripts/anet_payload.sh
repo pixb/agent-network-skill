@@ -12,8 +12,9 @@
 #
 # Budgets live in ONE file: scripts/budgets.json (override the path with
 # ANET_PAYLOAD_BUDGETS). SKILL.md quotes the same file and the eval criterion
-# budgets-in-docs-match-the-script refuses a drift. At the time of writing:
-#   pointer body   <= 360 chars, <= 8 lines   hub accepts 10 000 (TASK_CONTENT_MAX)
+# budgets-in-docs-match-the-script refuses a drift. Current values (read from that file at runtime,
+# not hard-coded here — edit budgets.json, not this comment):
+#   pointer body   <= 800 chars, no line cap (task_lines_max 0)  hub accepts 10 000 (TASK_CONTENT_MAX)
 #   brief body     <= 1600 chars (formatted task text, accept: required)
 #   result body    <= 2400 chars              hub stores the first 4000
 #   resend body    <= 400 chars (a task id costs 36 of them)
@@ -48,9 +49,12 @@
 #       budgets.json, first-line budget, the `accept:` line, code blocks, absolute
 #       paths. --kind picks the budget; it counts characters in python, so a C locale
 #       cannot turn a 100-character Chinese body into a 300-byte one.
-#       Markup is refused by DEFAULT — tables, `#` headings, `**bold**`, backticks are
-#       shown as raw characters by the Dashboard's plain-text surfaces (node card, node
-#       list rows, Tasks detail, Messages); --allow-markup is the explicit opt-out.
+#       Markup is GRADED, not banned wholesale (body_violations is the authority, same rule as SKILL.md
+#       §1.2 "Formatting is a hard rule, graded by line"): line 1 must be plain text (every preview
+#       surface shows only line 1 and renders it plain), so `#` headings, `- ` bullets, `>` quotes,
+#       `**bold**` and backticks ON LINE 1 are violations; from line 2 the same markup is allowed (the
+#       task pane renders markdown). Tables (`| … |`) and fenced code blocks are refused at EVERY line.
+#       `--allow-markup` opts out of the whole graded rule (it is not a line-1 exemption).
 #       --layout additionally lints the recommended subset (line <= 120 chars, `- `
 #       bullets, ASCII `key: value`); it is applied automatically to brief and result.
 #       A task id quoted in a --kind task body is reported as a reschedule: audit it
@@ -81,14 +85,15 @@
 #
 # options:
 #   --project-root <dir>  repo that holds the payload file (default: $PWD)
-#   --max <n>            body budget in characters (guard defaults: task 300, result 1200)
+#   --max <n>            body budget in characters (guard defaults come from budgets.json:
+#                        task = task_max, brief = brief_max, result = result_max, resend = resend_max)
 #   --kind task|result|brief|resend   guard: which text is audited
-#       task   ≤300, ≤6 lines — the pointer body (§1.2)
-#       brief  ≤1200, lines free, markup refused, `accept:` required — a formatted body with no payload file
-#       result ≤1200, lines free, markup refused — the delivered result text
-#       resend ≤340, `accept:` required — a body quoting an existing task id (quoting it costs 36 chars)
-#   --summary-max <n>    first-line budget in characters (default 80)
-#   --no-markup          guard only: refuse markup plain-text surfaces cannot render
+#       task   <= 800, no line cap — the pointer body (§1.2)
+#       brief  <= 1600, lines free, markup graded (plain line 1, markdown from line 2), `accept:` required
+#       result <= 2400, lines free, markup graded (plain line 1, markdown from line 2)
+#       resend <= 400, `accept:` required — a body quoting an existing task id (quoting it costs 36 chars)
+#   --summary-max <n>    first-line budget in characters (line1_max, 100)
+#   --no-markup          RETIRED (it now means --allow-markup); markup is graded by default
 #   --allow-dirty         do not refuse a file with uncommitted changes
 #   --allow-untracked     do not refuse a file that is not in git
 #   --force               compose even when a guard rejects the body
