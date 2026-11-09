@@ -65,7 +65,7 @@ Two rules shape every call (SKILL.md §1.1, §1.2): **one commhub call per round
 that performs a single transition may read the hub around it — that is still one round), and **short
 parameters** — the long text lives in a payload file and the parameter carries only
 `file:` + `sha12:` (one task = one file; `seg:` only for a segment pointer). Budgets: dispatch body
-≤300, delivered `result` ≤1200, message ≤1500, line 1 ≤80 — the hub accepts 10 000 / stores 4000, so
+≤360, brief `task` ≤1600, delivered `result` ≤2400, message ≤3000, line 1 ≤100 — the hub accepts 10 000 / stores 4000, so
 these are discipline, not limits:
 
 ```bash
@@ -75,8 +75,10 @@ these are discipline, not limits:
     --sha12 756d1c7db68e --print-body                                        # worker
 ./scripts/anet_payload.sh guard   --body "$TASK_BODY"                        # audit a dispatch body
 ./scripts/anet_payload.sh guard   --body "$RESULT" --kind result             # audit a delivery text
-./scripts/anet_payload.sh guard   --body "$RESEND" --kind resend             # a resend body: ≤340, accept: required
-./scripts/anet_payload.sh guard   --body "$BRIEF" --kind brief              # a brief body: ≤1200, accept: required, markdown-safe
+./scripts/anet_payload.sh guard   --body "$RESEND" --kind resend             # a resend body: ≤400, accept: required
+./scripts/anet_payload.sh guard   --body "$BRIEF" --kind brief              # a brief body: ≤1600, accept: required, markup refused by default
+./scripts/anet_payload.sh guard   --body "$ANY" --kind task --layout        # layout subset: line ≤120, "- " bullets, key: value
+./scripts/anet_payload.sh compose --file … --summary … --ttl 7200 --node-idle 1800   # refuses ttl < 2 x idle
 ANET_TOKEN=… ./scripts/anet_payload.sh upload --file commhub_tasks/r07/export-tests.md \
     --hub "$COMMHUB_URL" --network <network_id> --allow-untracked            # put the bytes on the hub
 ./scripts/anet_manual_node.sh files <task_id>                                # manual node: what the task carries

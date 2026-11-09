@@ -26,17 +26,24 @@ the repo, and the same pointer keeps working after `retry_task`.
 
 | argument | budget | hub ceiling (measured) |
 |---|---|---|
-| `send_task(task=…)` (pointer body) | ≤ 300 characters, ≤ 6 lines, line 1 ≤ 80 chars | 10 000 (`TASK_CONTENT_MAX`) |
-| `send_task(task=…)` (brief body, §1.2a) | ≤ 1200 characters, line 1 ≤ 80, `accept:` required, markdown-safe | 10 000 (`TASK_CONTENT_MAX`) |
-| `send_task(context=…)` | ≤ 200 characters, one line (project + branch + "in your working directory") | — |
-| `send_message` / `broadcast` / `send_reply` | ≤ 1500 characters, line 1 ≤ 80 | 10 000 (`send_reply` text) |
-| `report_completion(result=…)` | ≤ 1200 characters, line 1 ≤ 80 | stores the first 4000 |
-| resend body (quotes an existing `task_id`) | ≤ 340 characters, line 1 ≤ 80, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes |
+| `send_task(task=…)` (pointer body) | ≤ 360 characters, ≤ 8 lines, line 1 ≤ 100 chars | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (brief body, §1.2a) | ≤ 1600 characters, line 1 ≤ 100, `accept:` required, markdown-safe | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(context=…)` | ≤ 400 characters, one line (project + branch + "in your working directory") | 10 000; **no Dashboard surface renders `context`** — its cost is only the worker's context (§1.2) |
+| `send_message` / `broadcast` / `send_reply` | ≤ 3000 characters, line 1 ≤ 100 | 10 000 (`send_reply` text) |
+| `report_completion(result=…)` | ≤ 2400 characters, line 1 ≤ 100 | accepts 50 000, **stores the first 4000** (`tools.ts:1592`, `:1605`) — 2400 keeps a full 1600-character margin |
+| resend body (quotes an existing `task_id`) | ≤ 400 characters, line 1 ≤ 100, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes |
 
 The budgets are **discipline, not limits**: the dispatch body has to be echoed byte-for-byte by the
 worker, and a node card shows only a blind 200-character slice, so a longer body buys no display and
-adds drift. The delivery body is capped at 1200 because the task pane collapses at ≈12 lines ("What
+adds drift. The delivery body is capped at 2400: the task pane collapses at ≈12 lines **behind a '展开全文 ⌄' button** (`TaskChatPanel.tsx:601`, `:634`), so text past line 12 is one click away, not lost — and the hub's hard cliff is the first 4000 characters stored (`tools.ts:1592`, `:1605`) ("What
 renders where" below).
+
+Every number in this table is read from **`scripts/budgets.json`** by `anet_payload.sh`; SKILL.md quotes
+the same file, and `budgets-in-docs-match-the-script` refuses a drift. Two hard constraints the file also
+carries: the `result` budget stays under the hub's storage cliff (the first **4000** characters stored,
+`tools.ts:1592`, `:1605`), and the delivery's line 1 plus the next ≈340 characters are what the task pane
+shows before '展开全文 ⌄' (`TaskChatPanel.tsx:601`, `:634`) — conclusion there, item-by-item acceptance after.
+TTL discipline is machine-checked at compose time (`--ttl`/`--node-idle`), because the hub does not check it.
 
 ## What renders where (measured on the Dashboard, 2026-11-09)
 The same text lands on surfaces with **different renderers**, so the format rule is written for the
@@ -61,7 +68,7 @@ What follows from that table:
   `**bold**`, backticks. The dashboard had to add a markdown component for comments precisely because
   `## 归因更正`, `**错误**` and backticks were being shown **as their own characters**
   (`app/components/CommentMarkdown.tsx`, issue #1831).
-- **Delivery text ≤1200 characters, conclusion inside its first 12 lines** — that is where the task pane
+- **Delivery text ≤2400 characters; line 1 = the conclusion and lines 2–12 (the ≈340 characters the task pane shows before '展开全文 ⌄') = the evidence** — that is where the task pane
   collapses. The long report stays in a file.
 
 Never inside a parameter: a markdown spec, a code block, a log, a diff, a table, the content of a
@@ -88,10 +95,10 @@ accept:
 - the result lists each command you ran, in the order you ran it
 
 deliverable: the result text only, nothing written to disk
-report_completion once, result <= 1200 chars, line 1 is the conclusion
+report_completion once, result <= 2400 chars, line 1 is the conclusion
 ```
 
-Audited with `bash scripts/anet_payload.sh guard --body "…" --kind brief`: ≤1200 characters, line 1 ≤80,
+Audited with `bash scripts/anet_payload.sh guard --body "…" --kind brief`: ≤1600 characters, line 1 ≤100,
 the `accept:` block present, markup refused.
 
 **Why length is affordable here** (measured on a live hub with a pi runtime node, 2026-11-09): bodies of
@@ -114,7 +121,7 @@ named after the task**, not one file per round:
 
 Why a file per task, in measured terms: the worker `git pull`s and reads the file the pointer names.
 A file holding six tasks costs it six tasks' text on every run — five of them are tokens spent on
-somebody else's work — and a task body of ≤300 characters cannot tell it where to stop. One file per
+somebody else's work — and a task body of ≤360 characters cannot tell it where to stop. One file per
 task makes the read cost equal to the task. It also makes the fingerprint trivially unambiguous: the
 pointer names a file, and the hash is the file's.
 
@@ -174,7 +181,7 @@ Whole-file pointer (the default):
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 1200 chars
+report_completion once, result <= 2400 chars
 ```
 
 Segment pointer (when the task is one section of a document):
@@ -183,7 +190,7 @@ Segment pointer (when the task is one section of a document):
 第7轮 seg-01：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/spec.md  seg: seg-01  sha12: 3f7c64c57fb6
 branch main (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
-report_completion once, result <= 1200 chars
+report_completion once, result <= 2400 chars
 ```
 
 Line 1 is the one-line summary (≤80 chars, a complete sentence). Both bodies are 240–280 characters,
@@ -310,7 +317,7 @@ and `compose` says so in the same breath ("…or deliver it as a hub attachment"
    `report_completion(result=…)`; do not work on a guess and do not widen the change.
 4. Work the file the pointer names. Write the deliverable and the long report where the task asks for
     it, commit, push.
-5. `report_completion` once, with a ≤1200-character `result` (line 1 = the conclusion): what you ran
+5. `report_completion` once, with a ≤2400-character `result` (line 1 = the conclusion): what you ran
    to verify it, and the path of the long report. Format it with `- ` bullets and `key: value` fields —
    no tables, headings, bold markers or backticks ("What renders where" below).
 

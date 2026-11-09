@@ -49,7 +49,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   round even when it reads the hub before and after it (`anet_manual_node.sh working` fetches the
   stored body so the echo is byte-exact, then proves the task reached `running`) — the rule counts
   transitions, not shell characters.
-- **A long task is a pointer, never a paste.** The body is ≤300 characters; the spec lives in a
+- **A long task is a pointer, never a paste.** The body is ≤360 characters; the spec lives in a
   payload file, **one file per task** (a worker reads the file it is pointed at — a file holding six
   tasks makes it pay for six), and the parameter names `file:` + `sha12:`; add `seg:` only when the
   task really is one section of a document you must not split. Build it
@@ -57,22 +57,26 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
   the shell — a C locale must not silently triple a CJK body.
 - **The budgets are discipline, not limits.** The hub accepts 10 000 characters for `task`, stores the
-  first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 300 / 1200 / 1500, with
-  line 1 ≤80. A longer dispatch body buys no display (a node card shows a blind 200-character slice)
+  first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 360 / 1600 / 2400 / 3000, with
+  line 1 ≤100. A longer dispatch body buys no display (a node card shows a blind 200-character slice)
   and makes the byte-exact echo in `report_status(working)` more likely to drift.
 - **A brief body is allowed, and it is formatted, not pasted.** A read-only or one-shot task that fits in
-  ≤1200 characters goes in the body with an `accept:` block, `- ` bullets and blank-line blocks
+  ≤1600 characters goes in the body with an `accept:` block, `- ` bullets and blank-line blocks
   (`guard --kind brief`). Long specs stay in a payload file behind a pointer. Measured on a live hub:
   117 / 277 / 484-character bodies all reached `running` and `replied` (the node echoes the stored body,
   so the byte-exact `working` match survives length); the cost of length is the 200-character preview and
   the worker's context.
-  A **resend body** (it quotes an expired `task_id`) is budgeted at 340 — quoting a hub task id costs
+  A **resend body** (it quotes an expired `task_id`) is budgeted at 400 — quoting a hub task id costs
   36 characters — and must carry an `accept:` line, because that body is what acceptance quotes.
 - **Write for the surface that renders plain text.** The node's task pane renders markdown; the node
   card, node list rows, the Tasks detail and the Messages page do not. Use line 1 as a self-sufficient
   summary, blank lines between blocks, `- ` bullets, `key: value` fields; never tables, `#` headings,
   `**bold**` or backticks — there they appear as their own characters. `guard --kind result` refuses
-  markup and enforces the 1200-character delivery budget.
+  markup **by default** (opt out with `--allow-markup`), enforces the 2400-character delivery budget, checks
+  the layout subset on formatted bodies, prints the CJK share and an estimated token cost, and reads every
+  budget from `scripts/budgets.json` — the one file the docs quote (the eval criterion
+  `budgets-in-docs-match-the-script` refuses a drift). `compose --ttl --node-idle` refuses a TTL below
+  2 × the node's idle budget, which the hub never checks.
 - **A big file goes through the hub, not across disks.** `bash scripts/anet_payload.sh upload
   --file <relpath> --hub <url> --network <id>` → `file_id` + sha12 + the pointer line, and the same
   command's `meta.attachments` entry to dispatch with. Measured limits that bite: 12 MiB per file

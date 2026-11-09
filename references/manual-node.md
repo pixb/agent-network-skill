@@ -254,7 +254,7 @@ The task a manual node receives is normally a 4-line pointer (SKILL.md §1.2):
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 1200 chars
+report_completion once, result <= 2400 chars
 ```
 
 So the human side of the job is: `git pull`, then prove the pointer with the sibling script:
@@ -268,7 +268,7 @@ scripts/anet_payload.sh verify --file commhub_tasks/r07/export-tests.md \
 - a mismatch (or a missing segment) is a **conflict**: run `working`, then say so in `reply` — never
   work on the revision you happen to have;
 - work the printed **segment**, not the task text;
-- `reply` carries a ≤1200-character result (line 1 = the conclusion, then what you ran to verify it,
+- `reply` carries a ≤2400-character result (line 1 = the conclusion, then what you ran to verify it,
   then the path of the long report); the long report goes into the payload file and gets committed.
 
 Short bodies matter *more* for a manual node than for a runtime one: the script sends the stored body
@@ -565,7 +565,7 @@ The dispatched body is normally a 4-line pointer (`file:` / `seg:` / `sha12:`, �
 fetches that body from the hub (never retype it), and the human works the **file**: run
 `bash scripts/anet_payload.sh verify --file … --seg … --sha12 …` first; a non-zero exit (missing
 file, missing segment, sha12 mismatch) is a **conflict to report in `reply`**, not a licence to work
-on the revision you happen to have. `reply` carries a ≤1200-character `result` (line 1 is the
+on the revision you happen to have. `reply` carries a ≤2400-character `result` (line 1 is the
 conclusion) — what you ran to verify it, and the path of the long report, which goes into the payload
 file and gets committed.
 

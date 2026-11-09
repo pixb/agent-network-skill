@@ -219,18 +219,27 @@ git, bash, and `bash scripts/anet_payload.sh`); commhub calls are the scarce res
 
 ### 1.2 Short parameters; the long text goes to a file (hard rule)
 
+**The numbers live in `scripts/budgets.json`** — `guard` and `compose` read them from there, this table
+copies them, and the criterion `budgets-in-docs-match-the-script` refuses a drift. Change a budget in one
+place: the file. Measured bodies (measured in `docs/tests/report-skill-brief-body-20261109.txt`): a
+4-line Chinese pointer is **227** characters, the worst realistic one with three inline acceptance items
+is **242**, and a resend body quoting a task id plus four Chinese acceptance items is **248** — the
+budgets below leave room for a real body, not for a template sketch. Character budgets are what the hub
+counts too, so Chinese is not cheaper: it costs about 1 token per character and renders full-width on the
+Dashboard (`guard` prints `cjk` share and `est_tokens` so you can see the price before you dispatch).
+
 Budgets for text passed **into** a commhub argument. The hub's own ceilings are far larger — `task`
 accepts 10 000 characters (`TASK_CONTENT_MAX`), `report_completion` stores the first 4000 characters
 of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, not limits**:
 
 | argument | budget | why this number |
 |---|---|---|
-| `task` (pointer body at a payload file) | ≤ 300 chars, ≤ 6 lines, line 1 ≤ 80 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
-| `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1200 chars, line 1 ≤ 80, **`accept:` required**, markdown-safe | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
-| `report_completion` `result` | ≤ 1200 chars, line 1 ≤ 80 | the delivery is read in the node's task pane, which collapses at ≈12 lines: conclusion and evidence lines first, the long text in a file |
-| `send_message` / `broadcast` / `send_reply` | ≤ 1500 chars, line 1 ≤ 80 | list views show line 1 only |
-| resend body (quotes an existing `task_id`) | ≤ 340 chars, line 1 ≤ 80, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes (§7.5) |
-| `context` | ≤ 200 | the hub's preview cuts at 200 |
+| `task` (pointer body at a payload file) | ≤ 360 chars, ≤ 8 lines, line 1 ≤ 100 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
+| `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1600 chars, line 1 ≤ 100, **`accept:` required**, markdown-safe | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
+| `report_completion` `result` | ≤ 2400 chars, line 1 ≤ 100 | the hub stores the **first 4000** (`tools.ts:1592`, `:1605`) — 2400 stays clear of that cliff. The task pane collapses at ≈12 lines **behind '展开全文 ⌄'** (`TaskChatPanel.tsx:601`, `:634`), so lines past 12 are one click away, not lost: line 1 = the conclusion, lines 2–12 = the evidence, the item-by-item acceptance list after them, the long report in the payload file |
+| `send_message` / `broadcast` / `send_reply` | ≤ 3000 chars, line 1 ≤ 100 | list views show line 1 only |
+| resend body (quotes an existing `task_id`) | ≤ 400 chars, line 1 ≤ 100, **`accept:` required** | quoting a hub task id costs 36 characters; the resend body is what acceptance quotes (§7.5) |
+| `context` | ≤ 400, one line | 10 000 accepted (`tools.ts:2070`); **no Dashboard surface renders `context`** (measured: `TaskChatPanel.tsx` / `TaskDetail.tsx` never read `task.context`), so the 200-char preview is not its constraint — the cost is the worker's context |
 
 Never a pasted spec, a code block, a log, a diff, a table, a file's content, or an absolute path.
 
@@ -248,7 +257,7 @@ task: `commhub_tasks/<round>/<task-slug>.md`. The body is a 4-line pointer at th
 第7轮 导出测试：给导出函数补单元测试，3 个用例全绿
 file: commhub_tasks/r07/export-tests.md  sha12: 756d1c7db68e
 branch main (git pull first); work it in your own working directory; accept: every item on the acceptance list in the file
-report_completion once, result <= 1200 chars
+report_completion once, result <= 2400 chars
 ```
 
 **One file per task, and why that is not a style preference**: a worker pulls the branch and reads the
@@ -260,13 +269,19 @@ file per task makes the read cost equal to the task.
 there is no `seg:`, **the segment** when there is. Build the body mechanically — run
 `bash scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md --summary
 "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
-and refuses a >80-character summary, a >300-character body, a >6-line body, a code block, an absolute
+and refuses a >100-character summary, a >360-character body, a >8-line body, a code block, an absolute
 path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
 uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
 `bash scripts/anet_payload.sh verify --file … --sha12 …` first (`--seg …` for a segment pointer); a
 non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never work
 on a guess. Auditing a body you already have (a hub row, a draft) is
-`bash scripts/anet_payload.sh guard --body "…"`, the same rule from the same place.
+`bash scripts/anet_payload.sh guard --body "…" --kind task|brief|result|resend`, the same rule from the
+same place. It reads the budgets from `scripts/budgets.json`, refuses markup **by default**
+(`--allow-markup` is the opt-out), checks the layout subset on the formatted bodies (`--layout` asks for
+it everywhere: line length ≤120, `- ` bullets, ASCII `key: value`), prints the CJK share and an estimated
+token cost, and `compose --ttl <seconds> --node-idle <seconds>` refuses a TTL below 2 × the node's idle
+budget — the hub does not check that (default 3600, max 86400), and a short TTL is how a task dies in the
+sweep while the node sits idle.
 
 Segment pointers stay supported — `compose --file … --seg seg-NN` prints
 `file: …  seg: seg-NN  sha12: <segment hash>` — for a task that is one section of a document you
@@ -276,7 +291,7 @@ neighbours: use it when the document's unity is worth more than the worker's con
 ### 1.2a A brief body: when the task fits in the parameter, format it
 
 A task that is small, read-only, and needs no versioned spec goes in the body itself, formatted for the
-task pane (which renders markdown) and readable on the plain-text surfaces. Budget ≤1200, line 1 ≤80,
+task pane (which renders markdown) and readable on the plain-text surfaces. Budget ≤1600, line 1 ≤100,
 an `accept:` block required:
 
 ```text
@@ -293,16 +308,16 @@ accept:
 - the result lists each command you ran, in the order you ran it
 
 deliverable: the result text only, nothing written to disk
-report_completion once, result <= 1200 chars, line 1 is the conclusion
+report_completion once, result <= 2400 chars, line 1 is the conclusion
 ```
 
-Audited mechanically: `bash scripts/anet_payload.sh guard --body "…" --kind brief` — ≤1200 characters,
-line 1 ≤80, the `accept:` block present, and markup the plain-text surfaces cannot render (tables, `#`
+Audited mechanically: `bash scripts/anet_payload.sh guard --body "…" --kind brief` — ≤1600 characters,
+line 1 ≤100, the `accept:` block present, and markup the plain-text surfaces cannot render (tables, `#`
 headings, bold markers, backticks) refused.
 
 **Pick the shape by what the work needs**, not by taste:
 
-- brief body: steps and acceptance fit in ≤1200 characters, no file to version (read-only probes, one-shot
+- brief body: steps and acceptance fit in ≤1600 characters, no file to version (read-only probes, one-shot
   fixes, a question with a definition of done);
 - pointer body (§1.2): the spec is longer than a parameter, needs a `sha12` proof, needs to be reviewed in
   git, or is reused across rounds.
@@ -327,12 +342,12 @@ modes.
 - **TTL**: default 3600s for anything verified within the round; give 86400s explicitly for work
   that runs across hours or overnight, and keep `ttl_seconds ≥ 2 × the node's idle budget` — read
   `references/ttl-and-expiry.md` before shortening one.
-- **The body is a pointer, not the spec** (§1.2): ≤ 300 characters, ≤ 6 lines, with `file:` / `seg:` /
+- **The body is a pointer, not the spec** (§1.2): ≤ 360 characters, ≤ 8 lines, with `file:` / `seg:` /
   `sha12:` carrying the real content. A paste or code block in a parameter is the most reliable way to
   stall a task.
 - **One commhub call per round** (§1.1): the dispatch *is* the round; N tasks = N rounds.
 - **First line is a one-line summary** (this is what the dashboard node card shows): line 1 is a
-  ≤80-character summary that **stands as a complete sentence**, because `sessions.task` keeps only the
+  ≤100-character summary that **stands as a complete sentence**, because `sessions.task` keeps only the
   **first 200 characters** of the body, cut **blindly** — no sentence and no newline awareness — and
   the dashboard card, `get_all_status` and `/api/status` all read that column. A 4-line pointer puts
   the summary and the `file:`/`seg:`/`sha12:` line inside that preview (they end near character 95);
@@ -373,7 +388,7 @@ calls in it. Between them you do local work (read files, run the tests), which c
    `report_completion(alias=<self>, task=<task_id is safest; the raw body must match character-for-character if used>,
    result=<summary: conclusion / changes / how you verified — the task row keeps only the first 4000
    characters>, artifacts=[<URL or file path>])`. You may also pass `score` (self-assessed 0-10).
-   `result` is ≤1200 characters, line 1 a one-sentence conclusion: what changed, how it was verified,
+   `result` is ≤2400 characters, line 1 a one-sentence conclusion: what changed, how it was verified,
    and the path of the long report — the long report goes in the file (in the segment's 产出 section),
    not in the parameter. Format it for the task pane: `- ` bullets and `key: value` fields, no tables,
    headings, bold markers or backticks (§1.2, "Formatting is a hard rule").
@@ -437,7 +452,7 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
 - **One commhub call per round** (§1.1). A turn that fires several commhub calls leaves you with no
   way to tell which transition the hub accepted, and a batch of `report_completion` calls on one node
   overwrites the single session slot. Local calls (files, git, bash) are unlimited.
-- **Keep the body short** (§1.2, ≤300 characters). The body is echoed back byte-for-byte by the
+- **Keep the body short** (§1.2, ≤360 characters). The body is echoed back byte-for-byte by the
   worker in `report_status`, so every paragraph you paste into the parameter multiplies the chance of
   a drift that stalls the task in `acked`. Long text goes in a payload file — **one file per task**, so
   the worker never reads a neighbour's spec; the parameter carries `file:` + `sha12:` (and `seg:` only
@@ -723,7 +738,7 @@ both ids are written down, e.g. `expired_task_ids: [<old id>]` beside the new di
 **A resend body must carry the requirement line, and it names the old task id.** Quoting the expired
 `task_id` is what makes the dispatch log auditable (which round was a resend), and quoting it costs 36
 characters —
-so a resend body is audited at **≤340**, and `accept:` is mandatory in it. Measured 2026-11-09: a
+so a resend body is audited at **≤400**, and `accept:` is mandatory in it. Measured 2026-11-09: a
 timeout resend was dispatched as `resend <seg>: task <uuid> expired, work it again` with no acceptance
 line, and acceptance had to be argued in prose afterwards. `bash scripts/anet_payload.sh guard
 --kind resend` refuses exactly that body and accepts the same body with the `accept:` line added; if
