@@ -504,7 +504,7 @@ name that no longer exists.
 | `node_owner_mismatch` on `init` | that alias belongs to another node id or owner | reuse the existing config, or pick another alias |
 | `no such file for this node` on `fetch` | the id is unknown, deleted, or was uploaded in **another network** (the hub answers 404, never 403) | `files <task_id>` to read the ids the task really carries; dispatch from the network the node belongs to |
 | `sha12 mismatch` on `fetch` (exit 3) | the file changed after dispatch | `reply` with the conflict; do not work on the bytes you happen to have |
-| 私信在 Dashboard 看不到 | `dm` 落 `user_inbox`，Dashboard 没有读它的页面 | 交付走 `reply --via send_reply`（落 `inbox`，Messages 页可见）；私信只作提醒 |
+| 以为「私信在 Dashboard 看不见」 | 旧口径。`dm` 落 `user_inbox`，读它的面是 **`/messages/inbox`**（`?scope=user`，`case-9` 实测）；在 Tasks 页之外真正看不见的是 `report_completion` | 中途提问：`state blocked` + `dm`（任务保持 `running`）；交付要人读到：`reply --via send_reply`（落 `inbox`，Messages 页） |
 | dashboard 上手动节点显示成登录名（如 `admin`） | 前端在 `nodes.owner_user_id` 为 null 时的回退标签，不是 hub 身份 | 派活只认节点真实 alias；`GET /api/status?alias=admin` 实测 0 行 |
 | 节点在 dashboard 永久离线、名字还被占用 | 本地删了、hub 行没删（残留） | `anet node delete <node_id> --hub-only --hub <url>` |
 

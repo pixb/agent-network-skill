@@ -103,10 +103,13 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   to run, and a user has no `sessions` row to be dispatched to. One manager drives many projects:
   **the project boundary is the network** (alias uniqueness is network-scoped), node aliases carry
   machine + project, and every REST read needs `?network_id=`.
-- **`dm` is invisible in the Dashboard.** It writes `user_inbox`, and the Dashboard has no page for
-  it (`/dm` does not exist). The deliverable that a person must see goes through a task with
-  `reply --via send_reply` → `inbox(session_name=<dispatcher username>)`. A reply is terminal:
-  `replied` is not retryable, so mid-task questions use `state blocked` + `dm` and keep the task open.
+- **`dm` is readable in the Dashboard — `report_completion` is the invisible one.** `dm` writes
+  `user_inbox`, and `/messages/inbox` reads it (`?scope=user`, measured as `case-9`). A deliverable a
+  person must read goes through a task with `reply --via send_reply` →
+  `inbox(session_name=<dispatcher username>)`, which the Messages page reads. That reply is terminal:
+  `replied` is not retryable (`retry_task` accepts `failed` / `expired` / `cancelled`), so mid-task
+  questions use `state blocked` + `dm` and keep the task open. `report_completion` is the channel with
+  no message row at all — the Tasks page is the only place it shows.
 - **Deleting a node locally does not delete it on the hub.** `anet node delete` removes the local
   directory first; if the hub half fails you keep a `nodes` row plus an `offline` `sessions` row, and
   the alias stays taken. Clean it with `anet node delete <node_id> --hub-only`.
