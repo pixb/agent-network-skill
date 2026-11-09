@@ -257,8 +257,12 @@ print(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12])' "$PROJ/$TASK_FILE")
   # (content-sensitive) and not a character count that a budget change moves by one.
   POINTER_CHARS="$(printf '%s' "$POINTER_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["chars"])')"
   FIRST_CHARS="$(printf '%s' "$BODY" | head -1 | python3 -c 'import sys;print(len(sys.stdin.read().rstrip(chr(10))))')"
-  check "pointer_within_dispatch_budget" "$([ "$POINTER_CHARS" -le 300 ] && [ "$FIRST_CHARS" -le 80 ] && echo true || echo false)"
-  record_verdict "pointer names the task's own file (sha12 $SHA12, ${POINTER_CHARS} chars within the 300-character budget)"
+  BUDTASK="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["task_max"])' "$SKILL_DIR/scripts/budgets.json")"
+  BUDLINE1="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["line1_max"])' "$SKILL_DIR/scripts/budgets.json")"
+  check "pointer_within_dispatch_budget" "$([ "$POINTER_CHARS" -le "$BUDTASK" ] && [ "$FIRST_CHARS" -le "$BUDLINE1" ] && echo true || echo false)"
+  # the sha12 is pinned (it is the revision the task names); the two character counts are normalized,
+  # so the baseline does not break when a budget in scripts/budgets.json moves
+  record_verdict "$(printf '%s' "pointer names the task's own file (sha12 $SHA12, ${POINTER_CHARS} chars within the ${BUDTASK}-character budget)" | sed -E 's/[0-9]+ chars/<n> chars/; s/the [0-9]+-character budget/the <n>-character budget/')"
 fi
 TASK_ID="$(dispatch "$BODY")"
 record "dispatched"
@@ -664,10 +668,19 @@ if [ "$SCENARIO" = "short-pointer-payload" ]; then
        --sha12 000000000000 >"$WORK/verify-bad.log" 2>&1; then
     fail "verify accepted a sha12 that does not match the file"
   fi
-  # the guard that keeps the parameter short really fires
+  # the guard that keeps the parameter short really fires — at the budget the skill publishes,
+  # not at a number written into the test (line1_max + 1 characters is refused, line1_max passes)
+  LINE1_MAX="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["line1_max"])' "$SKILL_DIR/scripts/budgets.json")"
   if "$PAYLOAD_SH" compose --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
-       --summary "$(python3 -c 'print("字"*81)')" >"$WORK/compose-long.log" 2>&1; then
-    fail "compose accepted an 81-character summary line"
+       --summary "$(python3 -c 'import sys;print("字"*int(sys.argv[1]))' "$LINE1_MAX")" >"$WORK/compose-fit.log" 2>&1; then
+    :
+  else
+    sed 's/^/   /' "$WORK/compose-fit.log"
+    fail "compose refused a summary line at the published budget ($LINE1_MAX chars)"
+  fi
+  if "$PAYLOAD_SH" compose --project-root "$PROJ" --file "$PAYLOAD" --seg seg-01 \
+       --summary "$(python3 -c 'import sys;print("字"*(int(sys.argv[1])+1))' "$LINE1_MAX")" >"$WORK/compose-long.log" 2>&1; then
+    fail "compose accepted a summary line of $((LINE1_MAX + 1)) characters (the budget is $LINE1_MAX)"
   fi
   # and the guard reports the budget it measured, so the verdict is a real sentence
   BUDGET_JSON="$("$PAYLOAD_SH" guard --body "$STORED" --json 2>/dev/null)"

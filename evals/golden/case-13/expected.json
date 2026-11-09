@@ -10,7 +10,7 @@
     "status:replied"
   ],
   "verdicts": [
-    "pointer names the task's own file (sha12 ebdcc65c69cb, 256 chars within the 300-character budget)"
+    "pointer names the task's own file (sha12 ebdcc65c69cb, <n> chars within the <n>-character budget)"
   ],
   "checks": {
     "pointer_names_the_task_file": true,

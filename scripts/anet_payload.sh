@@ -3,18 +3,24 @@
 # segment of a payload file (SKILL.md §1.2, "short params, long text on disk").
 #
 # The rule this script enforces:
-#   · the `task` / `message` argument of a commhub call stays short (<= 300 chars,
-#     <= 6 lines, first line <= 80 chars);
+#   · the `task` / `message` argument of a commhub call stays short, and carries an
+#     `accept:` line naming what counts as done;
 #   · the long text (spec, steps, acceptance list, code, tables) lives in a file
 #     inside the project working tree, one file per task (segments only when the
 #     task really is one section of a document you must not split);
 #   · the parameter carries only: relative path + sha12 (+ seg id) + acceptance.
 #
-# Budgets and the hub's own ceilings (the budgets below are discipline, not limits):
-#   task body      <= 300 chars   hub accepts 10 000 (TASK_CONTENT_MAX)
-#   result body    <= 1200 chars  hub stores the first 4000
-#   message body   <= 1500 chars  hub accepts 10 000 (send_reply text)
-#   line 1         <= 80 chars    sessions.task keeps the first 200, cut blindly
+# Budgets live in ONE file: scripts/budgets.json (override the path with
+# ANET_PAYLOAD_BUDGETS). SKILL.md quotes the same file and the eval criterion
+# budgets-in-docs-match-the-script refuses a drift. At the time of writing:
+#   pointer body   <= 360 chars, <= 8 lines   hub accepts 10 000 (TASK_CONTENT_MAX)
+#   brief body     <= 1600 chars (formatted task text, accept: required)
+#   result body    <= 2400 chars              hub stores the first 4000
+#   resend body    <= 400 chars (a task id costs 36 of them)
+#   message body   <= 3000 chars              hub accepts 10 000 (send_reply text)
+#   context        <= 400 chars               no Dashboard surface renders it
+#   line 1         <= 100 chars               sessions.task keeps 200, cut blindly
+#   layout line    <= 120 chars               plain-text surfaces wrap unpredictably
 #
 # Why the sha12 is not decoration: `report_status(status="working", task=…)`
 # matches the stored body byte-for-byte, and `sessions.task` keeps only the first
@@ -36,17 +42,24 @@
 #       exits non-zero when it is not
 #   anet_payload.sh list    --file <relpath> [--json]
 #       segment ids, titles and character counts
-#   anet_payload.sh guard   --body "<text>" [--max 300] [--summary-max 80] [--no-markup] [--json]
-#       audit a body you already have (a hub row, a draft): char/line budget, first
-#       line budget, code block, absolute path. It is the same rule the compose
-#       guards apply, so a test can assert the rule against a stored body without
-#       duplicating the pattern — and it counts characters in python, so a C locale
+#   anet_payload.sh guard   --body "<text>" [--kind task|brief|result|resend] [--max <n>]
+#                           [--summary-max <n>] [--layout] [--allow-markup] [--json]
+#       audit a body you already have (a hub row, a draft): character/line budget from
+#       budgets.json, first-line budget, the `accept:` line, code blocks, absolute
+#       paths. --kind picks the budget; it counts characters in python, so a C locale
 #       cannot turn a 100-character Chinese body into a 300-byte one.
-#       A delivered result is audited with the delivery budget: --max 1200 --no-markup.
-#       --no-markup refuses the markup that the Dashboard's plain-text surfaces
-#       (node card, node list rows, Tasks detail, Messages) show as raw characters:
-#       tables, `#` headings, `**bold**`, backticks. The task pane is the one surface
-#       that renders markdown, and a table there is paid for by four plain surfaces.
+#       Markup is refused by DEFAULT — tables, `#` headings, `**bold**`, backticks are
+#       shown as raw characters by the Dashboard's plain-text surfaces (node card, node
+#       list rows, Tasks detail, Messages); --allow-markup is the explicit opt-out.
+#       --layout additionally lints the recommended subset (line <= 120 chars, `- `
+#       bullets, ASCII `key: value`); it is applied automatically to brief and result.
+#       A task id quoted in a --kind task body is reported as a reschedule: audit it
+#       with --kind resend. The output names the CJK share and an estimated token cost:
+#       character budgets are what the hub counts, so Chinese is not cheaper.
+#   anet_payload.sh compose … --ttl <seconds> --node-idle <seconds>
+#       refuses a TTL below 2 x the node's idle budget. The hub never checks this
+#       (default 3600, max 86400), and a short TTL is how a task dies in the sweep
+#       while the node sits idle.
 #   anet_payload.sh upload  --file <relpath> [--hub <url>] [--network <id>]
 #                           [--name <n>] [--mime <m>] [--allow-untracked] [--json]
 #       the dispatcher's half of the hub-attachment route: put these bytes on the hub,
@@ -93,6 +106,17 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The budgets live in ONE file, so SKILL.md, guard and compose cannot drift apart (the eval criterion
+# budgets-in-docs-match-the-script refuses a drift). Override the path with ANET_PAYLOAD_BUDGETS.
+BUDGETS_FILE="${ANET_PAYLOAD_BUDGETS:-$SCRIPT_DIR/budgets.json}"
+[ -f "$BUDGETS_FILE" ] || die "budgets file not found: $BUDGETS_FILE (the budgets live there; see --help)"
+budget() { python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));v=d.get(sys.argv[2]);print(sys.argv[3] if v in (None,"") else v)' "$BUDGETS_FILE" "$1" "$2"; }
+LINES_MAX="$(budget task_lines_max 8)"
+LAYOUT_LINE_MAX="$(budget layout_line_max 120)"
+SUMMARY_MAX_BUDGET="$(budget line1_max 100)"
+TASK_MAX_BUDGET="$(budget task_max 360)"
+RESULT_MAX_BUDGET="$(budget result_max 2400)"
 usage() { awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; }
 # The exit code is the SECOND argument and must never reach the message: an earlier
 # version used $*, so `die "no segment seg-09" 2` printed “no segment seg-09 2” and a
@@ -111,11 +135,14 @@ shift
 
 FILE="" SEG="" SUMMARY="" ACCEPT="" DELIVER="" BRANCH="" MAX=""
 KIND="task"
-BODY_ARG="" SUMMARY_MAX="80" NO_MARKUP=0
+BODY_ARG="" SUMMARY_MAX="" NO_MARKUP=0
+LAYOUT=0 ALLOW_MARKUP=0 TTL_ARG="" NODE_IDLE=""
 HUB_ARG="" NETWORK="" FNAME="" MIME="application/octet-stream"
 # The hub's own cap, measured in server/src/uploads.ts (MAX_UPLOAD_BYTES). It is stated
 # as a number here so a 40 MB dataset is refused before a byte is put on the wire.
 MAX_UPLOAD_BYTES=12582912
+# Resolved once so both commands use the same first-line budget.
+SUMMARY_MAX="${SUMMARY_MAX:-$SUMMARY_MAX_BUDGET}"
 SHA12="" PROJECT="${ANET_PAYLOAD_PROJECT:-$PWD}"
 JSON=0 PRINT_BODY=0 ALLOW_DIRTY=0 ALLOW_UNTRACKED=0 FORCE=0
 
@@ -129,7 +156,11 @@ while [ $# -gt 0 ]; do
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --max) MAX="${2:-}"; shift 2 ;;
     --summary-max) SUMMARY_MAX="${2:-}"; shift 2 ;;
-    --no-markup) NO_MARKUP=1; shift ;;
+    --no-markup) ALLOW_MARKUP=1; warn "--no-markup is retired: markup is refused by default now, use --allow-markup to opt out"; shift ;;
+    --allow-markup) ALLOW_MARKUP=1; shift ;;
+    --layout) LAYOUT=1; shift ;;
+    --ttl) TTL_ARG="${2:-}"; shift 2 ;;
+    --node-idle) NODE_IDLE="${2:-}"; shift 2 ;;
     --kind) KIND="${2:-task}"; shift 2 ;;
     --body) BODY_ARG="${2:-}"; shift 2 ;;
     --sha12) SHA12="${2:-}"; shift 2 ;;
@@ -266,32 +297,39 @@ SEG_JSON() { python3 -c "import json,sys;d=json.loads(sys.argv[1]);v=d.get(sys.a
 # ── the body-shape rule, shared by compose and guard ─────────────────────
 # Prints one line per violation; empty output means the body passes.
 body_violations() {
-  python3 - "$1" "${MAX:-300}" "${SUMMARY_MAX:-80}" "${NO_MARKUP:-0}" "${KIND:-task}" <<'PY'
+  python3 - "$1" "${MAX:-$TASK_MAX_BUDGET}" "${SUMMARY_MAX:-$SUMMARY_MAX_BUDGET}" "${LINES_MAX:-8}" "${LAYOUT_LINE_MAX:-120}" "${ALLOW_MARKUP:-0}" "${LAYOUT:-0}" "${KIND:-task}" <<'PY'
 import re, sys
 body = sys.argv[1]
-max_chars, max_first, no_markup, kind = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
+max_chars, max_first, lines_max, layout_line_max = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+allow_markup, layout_on, kind = sys.argv[6] == "1", sys.argv[7] == "1", sys.argv[8]
 lines = body.split("\n")
 violations = []
 if len(body) > max_chars:
     violations.append(f"the body is {len(body)} chars (budget {max_chars}) — the long text belongs in the file, not in the parameter")
-if len(lines) > 6 and kind not in ("result", "brief"):
-    violations.append(f"the body is {len(lines)} lines (budget 6)")
+if len(lines) > lines_max and kind in ("task", "resend"):
+    violations.append(f"the body is {len(lines)} lines (budget {lines_max})")
 # A body that names an existing task is a RESCHEDULE: it is the text the operator will accept against,
 # so it must carry a requirement line. Trigger: a task id quoted in the body (hub ids are uuid4, which
 # no file path, sha12, branch name or URL produces). Measured 2026-11-09: a timeout resend was
 # dispatched with the quoted id and no acceptance line, and acceptance became a prose argument.
-if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", body, re.I) or kind == "brief":
-    if not re.search(r"(?i)\baccept(ance)?\b|验收", body):
-        violations.append(
-            "the body names an existing task id (a reschedule) or is a brief body, and carries no "
-            "requirement line — the body must contain an `accept:` line naming what counts as done, "
-            "otherwise acceptance has nothing to quote (measured 2026-11-09: a timeout resend without one)"
-        )
+# Every body carries the requirement line. Acceptance is the object of the work, not an optional
+# garnish: a body without it forces acceptance to be argued in prose (measured 2026-11-09: a timeout
+# resend dispatched with a quoted task id and no acceptance line).
+if not re.search(r"(?i)\baccept(ance)?\b|验收", body):
+    violations.append(
+        f"the {kind} body carries no requirement line: it must contain an `accept:` line naming what "
+        "counts as done, otherwise acceptance has nothing to quote"
+    )
+if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", body, re.I) and kind == "task":
+    violations.append(
+        "a task id is quoted in a dispatch body (a reschedule): audit it with --kind resend, whose budget "
+        "makes room for the 36 characters an id costs"
+    )
 if lines and len(lines[0]) > max_first:
     violations.append(f"line 1 is {len(lines[0])} chars (budget {max_first}): sessions.task keeps only the first 200 chars and cuts blindly")
 if '```' in body:
     violations.append("the body contains a code block — code belongs in the payload file")
-if no_markup or kind in ("result", "brief"):
+if not allow_markup:
     # Measured on the Dashboard: the node card (NodesView.tsx line-clamp-2), the node list rows
     # (truncate), the Tasks detail (TaskDetail.tsx, whitespace-pre-wrap) and the Messages page all
     # render PLAIN text; only the task pane (TaskChatPanel, react-markdown) renders markdown. So a
@@ -345,6 +383,26 @@ for item in violations:
 PY
 }
 
+# The recommended subset, checked mechanically instead of generated: blank-line blocks, `- ` bullets,
+# `key: value` fields. Cheap to check, and it is what the plain-text surfaces reward.
+layout_violations() {
+  python3 - "$1" "${LAYOUT_LINE_MAX:-120}" <<'PY'
+import re, sys
+body, line_max = sys.argv[1], int(sys.argv[2])
+out = []
+for n, line in enumerate(body.split("\n"), 1):
+    if len(line) > line_max:
+        out.append(f"line {n} is {len(line)} chars (layout budget {line_max}): plain-text surfaces wrap it unpredictably")
+    if "\t" in line:
+        out.append(f"line {n} uses tab indentation: use a blank line between blocks, two spaces to continue")
+    if re.match(r"^\s*[*•·]", line):
+        out.append(f"line {n} bullets with a non-recommended marker: the subset is `- `")
+    if re.match(r"^[A-Za-z .]+：", line):
+        out.append(f"line {n} uses a full-width colon in a field: write `key: value` (ASCII colon, one space)")
+print("\n".join(out))
+PY
+}
+
 case "$CMD" in
   guard)
     [ -n "${BODY_ARG:-}" ] || die "guard needs --body \"<text>\""
@@ -352,24 +410,34 @@ case "$CMD" in
     # spends (measured in server/src): task 10 000, result stores 4000, send_reply 10 000.
     if [ -z "$MAX" ]; then
       case "$KIND" in
-        result) MAX=1200 ;;
-        brief) MAX=1200 ;;
-        resend) MAX=340 ;;
-        *) MAX=300 ;;
+        result) MAX="$(budget result_max 2400)" ;;
+        brief) MAX="$(budget brief_max 1600)" ;;
+        resend) MAX="$(budget resend_max 400)" ;;
+        *) MAX="$(budget task_max 360)" ;;
       esac
     fi
+    # The first-line budget is the preview budget (sessions.task keeps 200 chars, cut blindly).
+    [ -n "$SUMMARY_MAX" ] || SUMMARY_MAX="$SUMMARY_MAX_BUDGET"
     PROBLEMS="$(body_violations "$BODY_ARG")" || die "guard could not audit the body"
+    # The layout subset is enforced on the formatted bodies by default; --layout asks for it anywhere.
+    if [ "$LAYOUT" = 1 ] || [ "$KIND" = "brief" ] || [ "$KIND" = "result" ]; then
+      LAYOUT_PROBLEMS="$(layout_violations "$BODY_ARG")"
+      [ -z "$LAYOUT_PROBLEMS" ] || PROBLEMS="$(printf '%s\n%s' "$PROBLEMS" "$LAYOUT_PROBLEMS" | sed '/^$/d')"
+    fi
     CHARS="$(nchars "$BODY_ARG")"
     LINES="$(printf '%s' "$BODY_ARG" | python3 -c 'import sys; print(len(sys.stdin.read().split("\n")))')"
     FIRST="$(printf '%s' "$BODY_ARG" | head -1 | python3 -c 'import sys; print(len(sys.stdin.read().rstrip("\n")))')"
     if [ "$JSON" = 1 ]; then
-      python3 - "$CHARS" "$LINES" "$FIRST" "$MAX" "$SUMMARY_MAX" "$PROBLEMS" <<'PY'
-import json, sys
-chars, lines, first, max_chars, max_first, problems = sys.argv[1:7]
+      python3 - "$CHARS" "$LINES" "$FIRST" "$MAX" "$SUMMARY_MAX" "$BODY_ARG" "$PROBLEMS" <<'PY'
+import json, sys, unicodedata as u
+chars, lines, first, max_chars, max_first, body, problems = sys.argv[1:8]
+cjk = sum(1 for ch in body if ord(ch) > 0x2e80 and u.category(ch).startswith("Lo"))
 print(json.dumps({
     "ok": not problems,
     "chars": int(chars), "lines": int(lines), "first_line_chars": int(first),
     "max_chars": int(max_chars), "first_line_max": int(max_first),
+    "cjk_chars": cjk, "cjk_share": round(cjk / max(len(body), 1), 3),
+    "est_tokens": int((len(body) - cjk) / 4) + cjk,
     "violations": [line for line in problems.split("\n") if line],
 }, ensure_ascii=False, indent=2))
 PY
@@ -379,7 +447,11 @@ PY
       printf '%s\n' "$PROBLEMS" | sed "s/^/$SCRIPT_NAME: /"
       exit 2
     fi
+    CJKSTATS="$(printf '%s' "$BODY_ARG" | python3 -c 'import sys,unicodedata as u; b=sys.stdin.read(); c=sum(1 for ch in b if ord(ch)>0x2e80 and u.category(ch).startswith("Lo")); print(f"{c} ({int(100*c/max(len(b),1))}%) ~{int((len(b)-c)/4)+c} tokens")')"
     echo "body ok: $CHARS chars, $LINES lines, $FIRST on line 1"
+    # Character budgets are character-counted on the hub side too, so Chinese is not cheaper: it costs
+    # about 1 token per character and renders full-width on the Dashboard. The numbers are a self-assessment.
+    echo "        cjk: $CJKSTATS  (budget is characters; CJK costs about 1 token per character)"
     exit 0
     ;;
   list)
@@ -527,13 +599,20 @@ SEGSHA="$(SEG_JSON sha12)"
 SEGCHARS="$(SEG_JSON chars)"
 SUMCHARS="$(nchars "$SUMMARY")"
 [ "$SUMCHARS" -le "$SUMMARY_MAX" ] || die "the summary line is $SUMCHARS chars (max $SUMMARY_MAX): sessions.task keeps only the first 200 chars and cuts blindly"
+# TTL discipline, checked here because the hub does not check it (default 3600, max 86400): a task whose
+# TTL cannot cover 2 rounds of the node's idle budget dies in the sweep, not in the work.
+if [ -n "$TTL_ARG" ] && [ -n "$NODE_IDLE" ]; then
+  case "$TTL_ARG" in ''|*[!0-9]*) die "--ttl needs a number of seconds" ;; esac
+  case "$NODE_IDLE" in ''|*[!0-9]*) die "--node-idle needs a number of seconds" ;; esac
+  [ "$TTL_ARG" -ge $((2 * NODE_IDLE)) ] || die "ttl_seconds=$TTL_ARG is below 2 x the node's idle budget ($NODE_IDLE): the task dies in the TTL sweep, not in the work (measure 2026-11-09: expiry landed in the dispatcher's user_inbox, the node was idle)"
+fi
 
 if [ -n "$SEG" ]; then
   ACCEPT="${ACCEPT:-accept: every item on the segment acceptance list}"
 else
   ACCEPT="${ACCEPT:-accept: every item on the acceptance list in the file}"
 fi
-DELIVER="${DELIVER:-report_completion once, result <= 1200 chars}"
+DELIVER="${DELIVER:-report_completion once, result <= $RESULT_MAX_BUDGET chars}"
 BRANCH_LINE=""
 if [ -n "$BRANCH" ]; then BRANCH_LINE="branch $BRANCH (git pull first); "; fi
 

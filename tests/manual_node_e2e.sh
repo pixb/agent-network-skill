@@ -253,17 +253,17 @@ SHA4="$(printf '%s' "$POINTER4" | python3 -c 'import json,sys;print(json.load(sy
 RESEND_BODY="resend seg-01: task $TASK4 closed, work it again
 file: $PAYLOAD  seg: seg-01  sha12: $SHA4
 branch $BRANCH (git pull first); work it in your own working directory; accept: every item on the segment acceptance list
-report_completion once, result <= 1200 chars"
+report_completion once, result <= 2400 chars"
 RESEND_CHARS="$(printf '%s' "$RESEND_BODY" | python3 -c 'import sys;print(len(sys.stdin.read()))')"
 "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$RESEND_BODY" --kind resend >/dev/null \
   || { echo "guard refused a resend body that quotes the task id and carries accept: ($RESEND_CHARS chars)"; exit 1; }
-echo "   resend body (quotes task $TASK4, $RESEND_CHARS chars ≤ 340): accepted"
+echo "   resend body (quotes task $TASK4, $RESEND_CHARS chars ≤ 400): accepted"
 if "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$(printf '%s' "$RESEND_BODY" | sed 's/; accept: every item on the segment acceptance list//')" --kind resend >/dev/null 2>&1; then
   echo "guard accepted a resend body with no requirement line"; exit 1
 fi
 echo "   the same body with the requirement line removed: refused"
 
-echo "== a brief body: formatted, ≤1200, accept: required, and it round-trips (§1.2a)"
+echo "== a brief body: formatted, ≤1600, accept: required, and it round-trips (§1.2a)"
 BRIEF="e2e brief: report this node's branch and commit, read-only
 purpose: a formatted body the task pane renders as a list
 
@@ -275,7 +275,7 @@ accept:
 - the result names the branch and the commit sha
 - the result lists each command you ran, in the order you ran it
 
-report_completion once, result <= 1200 chars, line 1 is the conclusion"
+report_completion once, result <= 2400 chars, line 1 is the conclusion"
 BRIEF_CHARS=$(printf '%s' "$BRIEF" | python3 -c 'import sys;print(len(sys.stdin.read()))')
 "$SKILL_DIR/scripts/anet_payload.sh" guard --body "$BRIEF" --kind brief >/dev/null \
   || { echo "guard refused a brief body that meets its own rule ($BRIEF_CHARS chars)"; exit 1; }
@@ -414,7 +414,7 @@ hub, utok, net, file_id, sha12 = sys.argv[1:6]
 body = ("seg-01 附件规格：按附件正文执行\n"
         f"attachment: {file_id}  sha12: {sha12}\n"
         "work it in your own working directory; accept: the attachment's acceptance list\n"
-        "report_completion once, result <= 1200 chars")
+        "report_completion once, result <= 2400 chars")
 req = urllib.request.Request(
     hub + "/api/task", method="POST",
     headers={"Authorization": "Bearer " + utok, "Content-Type": "application/json"},
