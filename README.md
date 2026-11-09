@@ -65,7 +65,7 @@ Two rules shape every call (SKILL.md §1.1, §1.2): **one commhub call per round
 that performs a single transition may read the hub around it — that is still one round), and **short
 parameters** — the long text lives in a payload file and the parameter carries only
 `file:` + `sha12:` (one task = one file; `seg:` only for a segment pointer). Budgets: dispatch body
-≤360, brief `task` ≤1600, delivered `result` ≤2400, message ≤3000, line 1 ≤100 — the hub accepts 10 000 / stores 4000, so
+≤480, brief `task` ≤1600, delivered `result` ≤2400, message ≤3000, line 1 ≤100 — the hub accepts 10 000 / stores 4000, so
 these are discipline, not limits:
 
 ```bash

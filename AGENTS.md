@@ -49,7 +49,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   round even when it reads the hub before and after it (`anet_manual_node.sh working` fetches the
   stored body so the echo is byte-exact, then proves the task reached `running`) — the rule counts
   transitions, not shell characters.
-- **A long task is a pointer, never a paste.** The body is ≤360 characters; the spec lives in a
+- **A long task is a pointer, never a paste.** The body is ≤480 characters; the spec lives in a
   payload file, **one file per task** (a worker reads the file it is pointed at — a file holding six
   tasks makes it pay for six), and the parameter names `file:` + `sha12:`; add `seg:` only when the
   task really is one section of a document you must not split. Build it
@@ -57,7 +57,7 @@ Gotchas are in [SKILL.md](SKILL.md). The manual-node operating manual is in
   existing body with `guard` (§1.2). The budgets are counted in characters by python, never bytes by
   the shell — a C locale must not silently triple a CJK body.
 - **The budgets are discipline, not limits.** The hub accepts 10 000 characters for `task`, stores the
-  first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 360 / 1600 / 2400 / 3000, with
+  first 4000 of `result`, accepts 10 000 for `send_reply`; the protocol spends 480 / 1600 / 2400 / 3000, with
   line 1 ≤100. A longer dispatch body buys no display (a node card shows a blind 200-character slice)
   and makes the byte-exact echo in `report_status(working)` more likely to drift.
 - **A brief body is allowed, and it is formatted, not pasted.** A read-only or one-shot task that fits in

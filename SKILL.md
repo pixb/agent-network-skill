@@ -20,13 +20,13 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.7.3
+  version: 0.7.4
   created: 2026-10-07
   last_reviewed: 2026-11-09
   review_interval_days: 60
 provenance:
   maintainer: pixb
-  version: 0.7.3
+  version: 0.7.4
   created: 2026-10-07
 ---
 
@@ -221,12 +221,15 @@ git, bash, and `bash scripts/anet_payload.sh`); commhub calls are the scarce res
 
 **The numbers live in `scripts/budgets.json`** — `guard` and `compose` read them from there, this table
 copies them, and the criterion `budgets-in-docs-match-the-script` refuses a drift. Change a budget in one
-place: the file. Measured bodies (measured in `docs/tests/report-skill-brief-body-20261109.txt`): a
-4-line Chinese pointer is **227** characters, the worst realistic one with three inline acceptance items
-is **242**, and a resend body quoting a task id plus four Chinese acceptance items is **248** — the
-budgets below leave room for a real body, not for a template sketch. Character budgets are what the hub
-counts too, so Chinese is not cheaper: it costs about 1 token per character and renders full-width on the
-Dashboard (`guard` prints `cjk` share and `est_tokens` so you can see the price before you dispatch).
+place: the file. Measured bodies (the templates in `scripts/budgets.json`, measured on a live hub in
+`docs/tests/report-skill-brief-body-20261109.txt`): a 4-line Chinese pointer (path + seg + sha12 + branch
++ acceptance) is **213** characters, the worst realistic one with an extra context line is **271**, and a
+resend body quoting a task id plus four Chinese acceptance items is **248**. So the pointer budget is
+**480**: 209 spare characters over the worst real body, and the spare is deliberate — the node card shows
+a blind 200-character slice, so everything past line 2 is invisible *there* and is paid for in the
+worker's context on every dispatch. Character budgets are what the hub counts too, so Chinese is not
+cheaper: it costs about 1 token per character and renders full-width on the Dashboard (`guard` prints
+`cjk` share and `est_tokens` so you can see the price before you dispatch).
 
 Budgets for text passed **into** a commhub argument. The hub's own ceilings are far larger — `task`
 accepts 10 000 characters (`TASK_CONTENT_MAX`), `report_completion` stores the first 4000 characters
@@ -234,7 +237,7 @@ of `result`, `send_reply` accepts 10 000 — so **these budgets are discipline, 
 
 | argument | budget | why this number |
 |---|---|---|
-| `task` (pointer body at a payload file) | ≤ 360 chars, ≤ 8 lines, line 1 ≤ 100 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
+| `task` (pointer body at a payload file) | ≤ 480 chars, ≤ 8 lines, line 1 ≤ 100 | the worker must echo it **byte-for-byte** in `report_status(working)` (§2 step 5), and a node card shows only a blind 200-character slice — a longer body buys no display and multiplies drift |
 | `task` (brief body: steps and acceptance in the text, no payload file) | ≤ 1600 chars, line 1 ≤ 100, **`accept:` required**, markdown-safe | the task pane renders it as a list; runtime nodes echo the stored body verbatim, so the exact-match `working` flip still lands — measured on a live hub: 117 / 277 / 484-character bodies all went `delivered → running → replied` in ~20 s |
 | `report_completion` `result` | ≤ 2400 chars, line 1 ≤ 100 | the hub stores the **first 4000** (`tools.ts:1592`, `:1605`) — 2400 stays clear of that cliff. The task pane collapses at ≈12 lines **behind '展开全文 ⌄'** (`TaskChatPanel.tsx:601`, `:634`), so lines past 12 are one click away, not lost: line 1 = the conclusion, lines 2–12 = the evidence, the item-by-item acceptance list after them, the long report in the payload file |
 | `send_message` / `broadcast` / `send_reply` | ≤ 3000 chars, line 1 ≤ 100 | list views show line 1 only |
@@ -269,7 +272,7 @@ file per task makes the read cost equal to the task.
 there is no `seg:`, **the segment** when there is. Build the body mechanically — run
 `bash scripts/anet_payload.sh compose --file commhub_tasks/r07/export-tests.md --summary
 "第7轮 导出测试：给导出函数补单元测试，3 个用例全绿" --branch main`, which prints the exact `task` text
-and refuses a >100-character summary, a >360-character body, a >8-line body, a code block, an absolute
+and refuses a >100-character summary, a >480-character body, a >8-line body, a code block, an absolute
 path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
 uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
 `bash scripts/anet_payload.sh verify --file … --sha12 …` first (`--seg …` for a segment pointer); a
@@ -342,7 +345,7 @@ modes.
 - **TTL**: default 3600s for anything verified within the round; give 86400s explicitly for work
   that runs across hours or overnight, and keep `ttl_seconds ≥ 2 × the node's idle budget` — read
   `references/ttl-and-expiry.md` before shortening one.
-- **The body is a pointer, not the spec** (§1.2): ≤ 360 characters, ≤ 8 lines, with `file:` / `seg:` /
+- **The body is a pointer, not the spec** (§1.2): ≤ 480 characters, ≤ 8 lines, with `file:` / `seg:` /
   `sha12:` carrying the real content. A paste or code block in a parameter is the most reliable way to
   stall a task.
 - **One commhub call per round** (§1.1): the dispatch *is* the round; N tasks = N rounds.
@@ -452,7 +455,7 @@ created ──send_task──▶ delivered ──ack_inbox──▶ acked ──
 - **One commhub call per round** (§1.1). A turn that fires several commhub calls leaves you with no
   way to tell which transition the hub accepted, and a batch of `report_completion` calls on one node
   overwrites the single session slot. Local calls (files, git, bash) are unlimited.
-- **Keep the body short** (§1.2, ≤360 characters). The body is echoed back byte-for-byte by the
+- **Keep the body short** (§1.2, ≤480 characters). The body is echoed back byte-for-byte by the
   worker in `report_status`, so every paragraph you paste into the parameter multiplies the chance of
   a drift that stalls the task in `acked`. Long text goes in a payload file — **one file per task**, so
   the worker never reads a neighbour's spec; the parameter carries `file:` + `sha12:` (and `seg:` only

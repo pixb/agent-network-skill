@@ -26,7 +26,7 @@ the repo, and the same pointer keeps working after `retry_task`.
 
 | argument | budget | hub ceiling (measured) |
 |---|---|---|
-| `send_task(task=…)` (pointer body) | ≤ 360 characters, ≤ 8 lines, line 1 ≤ 100 chars | 10 000 (`TASK_CONTENT_MAX`) |
+| `send_task(task=…)` (pointer body) | ≤ 480 characters, ≤ 8 lines, line 1 ≤ 100 chars | 10 000 (`TASK_CONTENT_MAX`) |
 | `send_task(task=…)` (brief body, §1.2a) | ≤ 1600 characters, line 1 ≤ 100, `accept:` required, markdown-safe | 10 000 (`TASK_CONTENT_MAX`) |
 | `send_task(context=…)` | ≤ 400 characters, one line (project + branch + "in your working directory") | 10 000; **no Dashboard surface renders `context`** — its cost is only the worker's context (§1.2) |
 | `send_message` / `broadcast` / `send_reply` | ≤ 3000 characters, line 1 ≤ 100 | 10 000 (`send_reply` text) |
@@ -121,7 +121,7 @@ named after the task**, not one file per round:
 
 Why a file per task, in measured terms: the worker `git pull`s and reads the file the pointer names.
 A file holding six tasks costs it six tasks' text on every run — five of them are tokens spent on
-somebody else's work — and a task body of ≤360 characters cannot tell it where to stop. One file per
+somebody else's work — and a task body of ≤480 characters cannot tell it where to stop. One file per
 task makes the read cost equal to the task. It also makes the fingerprint trivially unambiguous: the
 pointer names a file, and the hash is the file's.
 

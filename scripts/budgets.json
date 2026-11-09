@@ -7,7 +7,7 @@
     "not cheaper: it costs about 1 token per character, and on the Dashboard's Latin-width UI a CJK",
     "character renders full-width. Use `guard`'s cjk_share/est_tokens line to self-assess."
   ],
-  "task_max": 360,
+  "task_max": 480,
   "task_lines_max": 8,
   "brief_max": 1600,
   "result_max": 2400,
