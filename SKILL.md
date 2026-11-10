@@ -20,7 +20,7 @@ compatibility: >-
   bun) on PATH; every other part of this skill is plain MCP tool calls.
 metadata:
   author: pixb
-  version: 0.7.5
+  version: 0.7.7
   created: 2026-10-07
   last_reviewed: 2026-11-09
   review_interval_days: 60
@@ -287,6 +287,23 @@ and refuses a >100-character summary, a >800-character body, a >8-line body, a c
 path (any token starting with `/`, `~/`, `X:\`, or `\\host\`), and a payload file that is untracked,
 uncommitted, or unpushed (the worker pulls the branch; it cannot read your disk). Worker side: run
 `bash scripts/anet_payload.sh verify --file … --sha12 …` first (`--seg …` for a segment pointer); a
+
+> **Pointer arithmetic (v0.7.6, 2026-11-10 incident):** the pointer quoted in a task body must be the
+> `sha12` printed by `anet_payload.sh compose/verify` — **not** `sha256sum file | cut -c1-12`. The two
+> differ, and a body quoting the `sha256sum` value makes the worker's `verify` report `MISMATCH` and
+> stop (a burned round). Re-verify after **any** payload edit (e.g. changing the target node line
+> changes the pointer: 082 `0a33dc210fab`→`ffa0b8c9a698`, 159 `de3b89e21b89`→`599c652de440`), and the
+payload file must be committed before dispatch (verify refuses untracked files), **and pushed to the
+> remote before `send_task`** — a payload committed only locally makes the worker's `git pull` fetch the
+> *previous* file, so its `verify` disagrees with the pointer quoted in the task body (incident 2026-11-10:
+> body quoted `599c652de440`, worker's repo copy `de3b89e21b89`). Rule: edit → commit → **push** → verify →
+> quote the fresh sha12 → `git fetch` and confirm `origin/main` equals your pushed commit → dispatch.
+> **Delivery proof (v0.7.7, 2026-11-10 incident):** a worker's `report_completion` is only accepted when the
+> quoted commit **exists on the remote**. Planner-side check before acceptance: `git fetch && git cat-file -t
+> <commit>` (a missing object ⇒ delivery is void, "not arrived" per §4.12) plus `sha256sum <segment>.png`
+> matching the reported `sha12`. Worker side: after `git push`, self-prove with `git ls-remote origin main`
+> and quote that line (incident: 130 R7 reported commit `9bf27a7c0530` which never existed remotely; remote
+> HEAD was `d449a7b`, the shipped PNG was still the old `8b48520f288a` ⇒ delivery void, 补交付单 issued).
 non-zero exit (missing file, missing segment, sha12 mismatch) means **report the conflict**, never work
 on a guess. Auditing a body you already have (a hub row, a draft) is
 `bash scripts/anet_payload.sh guard --body "…" --kind task|brief|result|resend`, the same rule from the
